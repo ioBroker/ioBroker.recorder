@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert');
-const { computeSelection, DeviceDetection } = require('../../build/lib/selection');
+const { computeSelection, DeviceDetection, displayName } = require('../../build/lib/selection');
 const { categoryModes, isNegativeRole, categoryOfRole } = require('../../build/lib/categories');
 const { DpClass } = require('../../build/lib/types');
 
@@ -126,6 +126,38 @@ describe('selection', () => {
         assert.strictEqual(selected.get('zigbee.0.lamp.state').room, 'Küche');
         assert.strictEqual(selected.get('zigbee.0.lamp.state').func, null);
         assert.strictEqual(selected.get('zigbee.0.sensor.temperature').room, null);
+    });
+
+    it('lists a room only once if two enums have the same name', () => {
+        const objects = createObjects();
+        objects['enum.rooms.kueche'] = {
+            _id: 'enum.rooms.kueche',
+            type: 'enum',
+            common: { name: 'Küche', members: ['zigbee.0.lamp', 'zigbee.0.lamp'] },
+            native: {},
+        };
+        const { selected } = computeSelection(objects, config());
+        assert.strictEqual(selected.get('zigbee.0.lamp.state').room, 'Küche');
+    });
+
+    it('puts the name of the channel or device in front of names like "SET"', () => {
+        const objects = {};
+        const add = (id, type, name) => (objects[id] = { _id: id, type, common: name === undefined ? {} : { name }, native: {} });
+        add('alias.0.Kueche', 'folder', 'Kueche');
+        add('alias.0.Kueche.Licht', 'channel', 'Licht');
+        add('alias.0.Kueche.Licht.SET', 'state', 'SET');
+        add('alias.0.Kueche.Licht.ON_SET', 'state', 'Kueche Licht ON SET');
+        add('shelly.0.plug1', 'device', { en: 'Washing machine', de: 'Waschmaschine' });
+        add('shelly.0.plug1.Relay0', 'channel', 'Channel Relay0');
+        add('shelly.0.plug1.Relay0.temperatureC', 'state', 'temperatureC');
+        add('zigbee.0.lamp', 'device', 'Hallway lamp');
+        add('zigbee.0.lamp.on_set', 'state', undefined);
+        add('javascript.0.counter', 'state', 'counter');
+        assert.strictEqual(displayName('alias.0.Kueche.Licht.SET', objects, 'de'), 'Licht SET');
+        assert.strictEqual(displayName('alias.0.Kueche.Licht.ON_SET', objects, 'de'), 'Kueche Licht ON SET');
+        assert.strictEqual(displayName('shelly.0.plug1.Relay0.temperatureC', objects, 'de'), 'Waschmaschine temperatureC');
+        assert.strictEqual(displayName('zigbee.0.lamp.on_set', objects, 'en'), 'Hallway lamp on_set');
+        assert.strictEqual(displayName('javascript.0.counter', objects, 'en'), 'counter');
     });
 
     it('requires a room or function if configured', () => {

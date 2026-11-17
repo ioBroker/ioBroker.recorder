@@ -45,29 +45,64 @@ function language(): string {
     return lang === 'zh-cn' ? 'zh-CN' : lang;
 }
 
+/**
+ * `toLocaleTimeString`, `toLocaleString` and `localeCompare` create a new ICU formatter with every
+ * call, which costs a few hundred milliseconds for the rows of one snapshot. The formatters are
+ * created once per language.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat | Intl.NumberFormat | Intl.Collator>();
+
+function cached<T extends Intl.DateTimeFormat | Intl.NumberFormat | Intl.Collator>(
+    key: string,
+    create: (lang: string) => T,
+): T {
+    const lang = language();
+    const id = `${lang}|${key}`;
+    let formatter = formatters.get(id) as T | undefined;
+    if (!formatter) {
+        formatter = create(lang);
+        formatters.set(id, formatter);
+    }
+    return formatter;
+}
+
+/** Compares names in the order of the language */
+export function compareText(a: string, b: string): number {
+    return cached('collator', lang => new Intl.Collator(lang)).compare(a, b);
+}
+
 /** "07:12" or "07:12:45" */
 export function formatTime(ts: number, seconds = false): string {
-    return new Date(ts).toLocaleTimeString(language(), {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: seconds ? '2-digit' : undefined,
-    });
+    return cached(
+        seconds ? 'time-s' : 'time',
+        lang =>
+            new Intl.DateTimeFormat(lang, {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: seconds ? '2-digit' : undefined,
+            }),
+    ).format(ts);
 }
 
 /** "Mo., 16.11.2026" */
 export function formatDate(ts: number): string {
-    return new Date(ts).toLocaleDateString(language(), {
-        weekday: 'short',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    });
+    return cached(
+        'date',
+        lang => new Intl.DateTimeFormat(lang, { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }),
+    ).format(ts);
+}
+
+/** "Montag, 16.11." for the day lines of the journal */
+export function formatDay(ts: number): string {
+    return cached(
+        'day',
+        lang => new Intl.DateTimeFormat(lang, { weekday: 'long', day: '2-digit', month: '2-digit' }),
+    ).format(ts);
 }
 
 /** "16.11. 07:12" */
 export function formatShort(ts: number): string {
-    const d = new Date(ts);
-    return `${d.toLocaleDateString(language(), { day: '2-digit', month: '2-digit' })} ${formatTime(ts)}`;
+    return `${cached('short', lang => new Intl.DateTimeFormat(lang, { day: '2-digit', month: '2-digit' })).format(ts)} ${formatTime(ts)}`;
 }
 
 /** Value for `<input type="datetime-local">` in local time */
@@ -102,7 +137,11 @@ export function formatValue(entry: Valued): string {
         return I18n.t(val ? 'on' : 'off');
     }
     if (typeof val === 'number') {
-        const text = val.toLocaleString(language(), { maximumFractionDigits: Math.abs(val) < 10 ? 2 : 1 });
+        const digits = Math.abs(val) < 10 ? 2 : 1;
+        const text = cached(
+            `number-${digits}`,
+            lang => new Intl.NumberFormat(lang, { maximumFractionDigits: digits }),
+        ).format(val);
         return entry.unit ? `${text} ${entry.unit}` : text;
     }
     const text = typeof val === 'string' ? val : JSON.stringify(val);
@@ -122,13 +161,13 @@ export function isActive(entry: Valued): boolean {
     return false;
 }
 
-/** Who caused a change: "admin (vis-2.0)", "Script javascript.0", "hue.0", "System" */
+/** Who caused a change: "admin, vis-2.0", "Script javascript.0", "hue.0", "System" */
 export function formatSource(entry: Pick<JournalEntry, 'src' | 'from' | 'user'>): string {
     const instance = entry.from?.replace(/^system\.adapter\./, '') || '';
     switch (entry.src) {
         case 'user': {
             const user = entry.user?.replace(/^system\.user\./, '') || I18n.t('user');
-            return instance ? `${user} (${instance})` : user;
+            return instance ? `${user}, ${instance}` : user;
         }
         case 'script':
             return I18n.t('Script %s', instance);

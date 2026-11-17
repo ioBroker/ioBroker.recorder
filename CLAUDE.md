@@ -107,6 +107,11 @@ gitignored, so `npm run build` must run before `npm pack`.
    `auto` leaves the selection alone and only sets `filter`). The plan said `enabled = false`, but
    the admin deletes the custom settings when they are disabled.
 
+`dp.name` is `displayName()`: the own name, but if it is only the last part of the ID ("SET",
+"ACTUAL", "temperatureC"), the name of the channel or device goes in front ("Licht SET",
+"Waschmaschine temperatureC"); a parent name that only contains its own ID part ("Channel Relay0")
+is skipped. Room and function names are deduplicated (two enums with the same name).
+
 `system.*` and the own namespace are never selected automatically. An alias and its target carry
 the same values: the alias is kept, the target dropped (unless included manually).
 
@@ -164,7 +169,14 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
 - **Tab**: one snapshot per jump (debounced to 150 ms while dragging, stale answers are dropped), the
   journal of 6 h before the cursor, playback fetches only the changes since the last step and loads
   a full snapshot every 20 steps (5 minute values) or when there were too many changes. The status
-  line shows the time of a jump until it is drawn (acceptance < 300 ms).
+  line shows the time of a jump until the commit (`useLayoutEffect`, not the next frame: browsers
+  throttle frames of background windows). Measured on vitanova (1,202 states, 233 kB snapshot):
+  86-165 ms, of which ~100 ms are the round trip through admin.
+- **Rendering**: the tiles and the journal are plain elements with class names and one `sx` per
+  list (`GRID_SX`, `LIST_SX`), `title` instead of MUI tooltips, `React.memo` for tiles and journal
+  (a tile renders again only if its room or its highlighted IDs change). Formatters and the collator
+  are cached `Intl` objects in `format.ts`: `toLocaleString` / `localeCompare` per row cost
+  ~200 ms per render. Keep it that way when adding rows.
 
 ### Recording path
 

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Box, Button, Paper, Tooltip, Typography, useTheme } from '@mui/material';
+import { Box, Button, Paper, Typography, type Theme } from '@mui/material';
 import {
     Blinds,
     Bolt,
@@ -16,9 +16,9 @@ import {
 import { I18n } from '@iobroker/gui-components';
 
 import type { SnapshotEntry } from '../api';
-import { CATEGORY_LABELS, categoryOrder, formatShort, formatValue, isActive } from '../format';
+import { CATEGORY_LABELS, categoryOrder, compareText, formatShort, formatValue, isActive } from '../format';
 
-const ICONS: Record<string, React.ComponentType<{ sx?: object; fontSize?: 'small' }>> = {
+const ICONS: Record<string, React.ComponentType<{ className?: string; fontSize?: 'small' }>> = {
     light: Lightbulb,
     shading: Blinds,
     climate: Thermostat,
@@ -33,6 +33,54 @@ const ICONS: Record<string, React.ComponentType<{ sx?: object; fontSize?: 'small
 
 /** Rows shown per room before "more" */
 const ROWS = 14;
+
+/**
+ * The styles of all rows in one place: a few hundred rows with their own `sx`, tooltips and
+ * typography components cost a quarter of a second per render, plain elements almost nothing.
+ */
+const GRID_SX = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gap: 1.5,
+    alignItems: 'start',
+    '& .t-tile': { p: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 0 },
+    '& .t-head': { display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.5 },
+    '& .t-room': {
+        typography: 'subtitle1',
+        fontWeight: 600,
+        flexGrow: 1,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+    '& .t-summary': { typography: 'caption', color: 'text.secondary', whiteSpace: 'nowrap' },
+    '& .t-row': {
+        typography: 'body2',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        px: 0.5,
+        py: 0.25,
+        borderRadius: 1,
+        transition: 'background-color 0.4s',
+    },
+    '& .t-changed': {
+        bgcolor: (theme: Theme) =>
+            theme.palette.mode === 'dark' ? 'rgba(255, 193, 7, 0.16)' : 'rgba(255, 193, 7, 0.25)',
+    },
+    '& .t-icon': { color: 'text.disabled' },
+    '& .t-active .t-icon': { color: 'warning.main' },
+    '& .t-active.t-light .t-icon': { color: '#f5b400' },
+    '& .t-name': { flexGrow: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+    '& .t-value': {
+        maxWidth: '45%',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontVariantNumeric: 'tabular-nums',
+    },
+    '& .t-active .t-value': { fontWeight: 600 },
+} as const;
 
 interface RoomTilesProps {
     states: SnapshotEntry[];
@@ -65,7 +113,7 @@ function roomsOf(states: SnapshotEntry[]): Room[] {
     for (const [name, entries] of byRoom) {
         entries.sort(
             (a, b) =>
-                categoryOrder(a.category) - categoryOrder(b.category) || (a.name || a.id).localeCompare(b.name || b.id),
+                categoryOrder(a.category) - categoryOrder(b.category) || compareText(a.name || a.id, b.name || b.id),
         );
         const lights = entries.filter(e => e.category === 'light' && typeof e.val !== 'string');
         rooms.push({
@@ -74,17 +122,47 @@ function roomsOf(states: SnapshotEntry[]): Room[] {
             lights: lights.length,
             lightsOn: lights.filter(isActive).length,
             open: entries.filter(e => e.category === 'windowsDoors' && isActive(e)).length,
-            temperature: entries.find(e => e.category === 'climate' && (e.role || '').includes('temperature')) || null,
+            // the temperature of a room; the states without room have none
+            temperature:
+                (name &&
+                    entries.find(
+                        e =>
+                            e.category === 'climate' &&
+                            typeof e.val === 'number' &&
+                            (e.role || '').includes('temperature'),
+                    )) ||
+                null,
         });
     }
     // rooms by name, the states without room last
-    return rooms.sort((a, b) => (!a.name ? 1 : !b.name ? -1 : a.name.localeCompare(b.name)));
+    return rooms.sort((a, b) => (!a.name ? 1 : !b.name ? -1 : compareText(a.name, b.name)));
 }
 
-function Tile(props: { room: Room; cursor: number; recent: number }): React.JSX.Element {
-    const { room, cursor, recent } = props;
-    const theme = useTheme();
+function tooltip(entry: SnapshotEntry): string {
+    const lines = [entry.id];
+    const label = CATEGORY_LABELS[entry.category || ''];
+    if (label) {
+        lines.push(I18n.t(label));
+    }
+    if (entry.lc !== null) {
+        lines.push(I18n.t('changed at %s', formatShort(entry.lc)));
+    }
+    if (entry.aggregated) {
+        lines.push(I18n.t('5 minute value'));
+    }
+    return lines.join('\n');
+}
+
+interface TileProps {
+    room: Room;
+    /** IDs of the highlighted rows, joined: a tile renders again only if it changes */
+    changed: string;
+}
+
+function TileView(props: TileProps): React.JSX.Element {
+    const { room } = props;
     const [all, setAll] = useState(false);
+    const changed = new Set(props.changed ? props.changed.split('\n') : []);
     const shown = all ? room.entries : room.entries.slice(0, ROWS);
     const summary: string[] = [];
     if (room.lights) {
@@ -100,100 +178,34 @@ function Tile(props: { room: Room; cursor: number; recent: number }): React.JSX.
     return (
         <Paper
             variant="outlined"
-            sx={{ p: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 0 }}
+            className="t-tile"
         >
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.5 }}>
-                <Typography
-                    variant="subtitle1"
-                    sx={{ fontWeight: 600, flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
-                    noWrap
-                >
-                    {room.name || I18n.t('Without room')}
-                </Typography>
-                <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    noWrap
-                >
-                    {summary.join(' · ')}
-                </Typography>
-            </Box>
+            <div className="t-head">
+                <span className="t-room">{room.name || I18n.t('Without room')}</span>
+                <span className="t-summary">{summary.join(' · ')}</span>
+            </div>
             {shown.map(entry => {
                 const Icon = ICONS[entry.category || ''] || Sensors;
-                const active = isActive(entry);
-                const changed = entry.lc !== null && cursor - entry.lc >= 0 && cursor - entry.lc < recent;
+                let className = 't-row';
+                if (isActive(entry)) {
+                    className += entry.category === 'light' ? ' t-active t-light' : ' t-active';
+                }
+                if (changed.has(entry.id)) {
+                    className += ' t-changed';
+                }
                 return (
-                    <Tooltip
+                    <div
                         key={entry.id}
-                        placement="left"
-                        title={
-                            <span>
-                                {entry.id}
-                                <br />
-                                {CATEGORY_LABELS[entry.category || '']
-                                    ? I18n.t(CATEGORY_LABELS[entry.category || ''])
-                                    : ''}
-                                {entry.lc !== null ? (
-                                    <>
-                                        <br />
-                                        {I18n.t('changed at %s', formatShort(entry.lc))}
-                                    </>
-                                ) : null}
-                                {entry.aggregated ? (
-                                    <>
-                                        <br />
-                                        {I18n.t('5 minute value')}
-                                    </>
-                                ) : null}
-                            </span>
-                        }
+                        className={className}
+                        title={tooltip(entry)}
                     >
-                        <Box
-                            sx={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 1,
-                                px: 0.5,
-                                py: 0.25,
-                                borderRadius: 1,
-                                transition: 'background-color 0.4s',
-                                bgcolor: changed
-                                    ? theme.palette.mode === 'dark'
-                                        ? 'rgba(255, 193, 7, 0.16)'
-                                        : 'rgba(255, 193, 7, 0.25)'
-                                    : 'transparent',
-                            }}
-                        >
-                            <Icon
-                                fontSize="small"
-                                sx={{
-                                    color: active
-                                        ? entry.category === 'light'
-                                            ? '#f5b400'
-                                            : theme.palette.warning.main
-                                        : theme.palette.text.disabled,
-                                }}
-                            />
-                            <Typography
-                                variant="body2"
-                                noWrap
-                                sx={{ flexGrow: 1, minWidth: 0 }}
-                            >
-                                {entry.name || entry.id}
-                            </Typography>
-                            <Typography
-                                variant="body2"
-                                noWrap
-                                sx={{
-                                    fontWeight: active ? 600 : 400,
-                                    fontVariantNumeric: 'tabular-nums',
-                                    maxWidth: '45%',
-                                }}
-                            >
-                                {formatValue(entry)}
-                            </Typography>
-                        </Box>
-                    </Tooltip>
+                        <Icon
+                            fontSize="small"
+                            className="t-icon"
+                        />
+                        <span className="t-name">{entry.name || entry.id}</span>
+                        <span className="t-value">{formatValue(entry)}</span>
+                    </div>
                 );
             })}
             {room.entries.length > ROWS ? (
@@ -209,8 +221,11 @@ function Tile(props: { room: Room; cursor: number; recent: number }): React.JSX.
     );
 }
 
+const Tile = React.memo(TileView);
+
 /** One tile per room with the state of its lights, windows, climate, shading ... at the cursor */
-export function RoomTiles(props: RoomTilesProps): React.JSX.Element {
+function RoomTilesView(props: RoomTilesProps): React.JSX.Element {
+    const { cursor, recent } = props;
     const rooms = useMemo(() => roomsOf(props.states), [props.states]);
     if (!rooms.length) {
         return (
@@ -223,22 +238,19 @@ export function RoomTiles(props: RoomTilesProps): React.JSX.Element {
         );
     }
     return (
-        <Box
-            sx={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                gap: 1.5,
-                alignItems: 'start',
-            }}
-        >
+        <Box sx={GRID_SX}>
             {rooms.map(room => (
                 <Tile
                     key={room.name}
                     room={room}
-                    cursor={props.cursor}
-                    recent={props.recent}
+                    changed={room.entries
+                        .filter(e => e.lc !== null && cursor - e.lc >= 0 && cursor - e.lc < recent)
+                        .map(e => e.id)
+                        .join('\n')}
                 />
             ))}
         </Box>
     );
 }
+
+export const RoomTiles = React.memo(RoomTilesView);

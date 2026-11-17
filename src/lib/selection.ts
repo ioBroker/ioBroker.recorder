@@ -83,6 +83,46 @@ export function translatedName(name: ioBroker.StringOrTranslated | undefined, la
     return name[lang] || name.en || Object.values(name).find(v => typeof v === 'string' && v) || null;
 }
 
+/** "ON_SET", "on set" and "On-Set" are the same name */
+function normalizeName(name: string): string {
+    return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+function sameName(a: string, b: string): boolean {
+    return normalizeName(a) === normalizeName(b);
+}
+
+/**
+ * The name of a state for the journal and the tiles. Many states are only called like the last part
+ * of their ID ("SET", "ACTUAL", "temperatureC"); they get the name of their channel or device in
+ * front: the first one that says more than its own ID part ("Channel Relay0" does not), else the
+ * name of the channel.
+ */
+export function displayName(
+    id: string,
+    objects: Record<string, ioBroker.Object | null | undefined>,
+    lang: ioBroker.Languages,
+): string | null {
+    const last = id.substring(id.lastIndexOf('.') + 1);
+    const own = translatedName(objects[id]?.common?.name, lang);
+    if (own && !sameName(own, last)) {
+        return own;
+    }
+    let fallback: string | null = null;
+    let parent = parentOf(id);
+    // channel and device; not the adapter instance
+    for (let level = 0; level < 2 && parent.split('.').length > 2; level++) {
+        const part = parent.substring(parent.lastIndexOf('.') + 1);
+        const name = translatedName(objects[parent]?.common?.name, lang) || part;
+        if (!normalizeName(name).includes(normalizeName(part))) {
+            return `${name} ${own || last}`;
+        }
+        fallback ??= name;
+        parent = parentOf(parent);
+    }
+    return fallback ? `${fallback} ${own || last}` : own;
+}
+
 /**
  * Initial storage class from the object and the category mode. Milestone 3 refines it by measuring
  * the rate of changes.
@@ -144,7 +184,11 @@ function buildEnumIndex(objects: Record<string, ioBroker.Object>, lang: ioBroker
                 info = { rooms: [], funcs: [] };
                 index.set(member, info);
             }
-            (isRoom ? info.rooms : info.funcs).push(name);
+            const list = isRoom ? info.rooms : info.funcs;
+            // two enums with the same name, or a member listed twice
+            if (!list.includes(name)) {
+                list.push(name);
+            }
         }
     }
     return index;
@@ -515,7 +559,7 @@ export function computeSelection(
         }
         selected.set(id, {
             oid: id,
-            name: translatedName(common.name, config.lang),
+            name: displayName(id, objects, config.lang),
             room: enums.rooms.join(', ') || null,
             func: enums.funcs.join(', ') || null,
             role: role || null,
