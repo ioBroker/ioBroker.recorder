@@ -202,6 +202,9 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 -->
 
 ## Changelog
+### 0.1.1 (2026-11-17)
+* (bluefox) README: comparison with history, sql and influxdb as a table
+
 ### 0.1.0 (2026-11-17)
 * (bluefox) Initial version: storage layer, batched writing, keyframes, retention
 * (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
