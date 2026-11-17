@@ -16,7 +16,7 @@ The implementation plan (German) is the Claude Doc "ioBroker.recorder: Umsetzung
 | --- | --- | --- |
 | M1 | scaffold, SQLite storage, batched writing, keyframes, retention | done |
 | M2 | selection engine (type detector, enums, roles, include/exclude, custom exclusions) | done |
-| M3 | frequency filter, classification by rate, 5 min aggregation, `getHistory` | done (7 day acceptance run and Echarts test open) |
+| M3 | frequency filter, classification by rate, 5 min aggregation, `getHistory` | done (7 day acceptance run open; echarts lists the states via `getEnabledDPs` since 2ece83f, admin not yet) |
 | M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | done |
 | M5 | presence simulation | done |
 | M6 | anomaly detection | done (acceptance over weeks of normal operation open) |
