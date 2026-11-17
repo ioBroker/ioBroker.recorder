@@ -3,7 +3,7 @@
 const assert = require('node:assert');
 
 const { DpClass } = require('../../build/lib/types');
-const { HourStats, addToProfile, hourOfWeek } = require('../../build/lib/stats');
+const { HourStats, ProfileBuilder, hourOfWeek } = require('../../build/lib/stats');
 const {
     AnomalyTracker,
     DEFAULT_ANOMALY_SETTINGS,
@@ -69,19 +69,41 @@ describe('anomaly detection: statistics and rules', () => {
             assert.strictEqual(hourOfWeek(at(22, 23)), 167);
         });
 
-        it('updates the profile like the batch statistics (Welford)', () => {
+        it('builds the profile like the batch statistics (Welford) and the baseline from live hours', () => {
             const values = [20, 21.5, 19, 22, 20.5];
-            let cell;
-            values.forEach(
-                (avg, i) =>
-                    (cell = addToProfile(cell, {
-                        avg,
-                        min: avg - 1,
-                        max: avg + 1,
-                        changes: i % 2,
-                        updates: 6,
-                    })),
+            const builder = new ProfileBuilder();
+            values.forEach((avg, i) =>
+                builder.add({
+                    ts: at(16, 10) - i * 7 * 24 * HOUR,
+                    dp: 1,
+                    how: 10,
+                    avg,
+                    min: avg - 1,
+                    max: avg + 1,
+                    last: avg,
+                    onSec: 0,
+                    changes: i % 2,
+                    updates: 6,
+                    maxGap: (i + 1) * MIN,
+                    // the two oldest weeks computed from the recording
+                    bf: i >= 3,
+                }),
             );
+            builder.add({
+                ts: at(16, 11),
+                dp: 1,
+                how: 11,
+                avg: null,
+                min: null,
+                max: null,
+                last: null,
+                onSec: 0,
+                changes: 0,
+                updates: 1,
+                maxGap: 0,
+                bf: false,
+            });
+            const cell = builder.cell(1, 10);
             const mean = values.reduce((a, b) => a + b) / values.length;
             const variance = values.reduce((a, v) => a + (v - mean) ** 2, 0) / (values.length - 1);
             assert.strictEqual(cell.n, 5);
@@ -90,6 +112,31 @@ describe('anomaly detection: statistics and rules', () => {
             assert.strictEqual(cell.min, 18);
             assert.strictEqual(cell.max, 23);
             assert.ok(Math.abs(cell.pActive - 0.4) < 1e-9);
+            assert.deepStrictEqual(builder.cell(1, 11), {
+                n: 1,
+                nVal: 0,
+                mean: null,
+                m2: 0,
+                pActive: 0,
+                avgChanges: 0,
+                avgUpdates: 1,
+                min: null,
+                max: null,
+            });
+            assert.strictEqual(builder.cell(1, 12), null);
+            assert.deepStrictEqual(
+                [...builder.hour(10)].map(([dp]) => dp),
+                [1],
+            );
+            assert.deepStrictEqual(builder.baselines().get(1), {
+                dp: 1,
+                since: at(16, 10) - 4 * 7 * 24 * HOUR,
+                liveSince: at(16, 10) - 2 * 7 * 24 * HOUR,
+                hours: 4,
+                updates: 19,
+                changes: 1,
+                maxGap: 3 * MIN,
+            });
         });
     });
 

@@ -50,34 +50,136 @@ export interface ProfileCell {
     max: number | null;
 }
 
+/** A row of `stat_hour` as stored */
+export interface StoredStatHour extends StatHourRow {
+    /** Computed from the recording: no counted updates, changes after the frequency filter */
+    bf: boolean;
+}
+
+/** What the statistics tell per datapoint (`Baseline` without the durations of the active state) */
+export interface StatBaseline {
+    dp: number;
+    since: number;
+    liveSince: number | null;
+    hours: number;
+    updates: number;
+    changes: number;
+    maxGap: number;
+}
+
+export const WEEK_HOURS = 168;
+// the fields of one hour of the week in `ProfileBuilder`
+const N = 0;
+const N_VAL = 1;
+const MEAN = 2;
+const M2 = 3;
+const ACTIVE = 4;
+const CHANGES = 5;
+const UPDATES = 6;
+const MIN = 7;
+const MAX = 8;
+const FIELDS = 9;
+
 /**
- * Adds one hour to a profile cell (Welford's online algorithm for mean and variance).
- *
- * @param cell the cell so far, if any
- * @param row the statistics of the hour
+ * Collects the weekly profiles (mean and variance by Welford's online algorithm) and the
+ * baselines from the hourly statistics, row by row: the daily rebuild reads `stat_hour` day by day
+ * and gives the event loop a chance in between. One `Float64Array` per datapoint (12 kB).
  */
-export function addToProfile(cell: ProfileCell | undefined, row: StatHourRow): ProfileCell {
-    const next: ProfileCell = cell
-        ? { ...cell }
-        : { n: 0, nVal: 0, mean: null, m2: 0, pActive: 0, avgChanges: 0, avgUpdates: 0, min: null, max: null };
-    next.n++;
-    next.pActive += ((row.changes > 0 ? 1 : 0) - next.pActive) / next.n;
-    next.avgChanges += (row.changes - next.avgChanges) / next.n;
-    next.avgUpdates += (row.updates - next.avgUpdates) / next.n;
-    if (row.avg !== null) {
-        next.nVal++;
-        const mean = next.mean ?? 0;
-        const delta = row.avg - mean;
-        next.mean = mean + delta / next.nVal;
-        next.m2 += delta * (row.avg - next.mean);
+export class ProfileBuilder {
+    private readonly cells = new Map<number, Float64Array>();
+    private readonly bases = new Map<number, StatBaseline>();
+
+    public add(row: StoredStatHour): void {
+        if (row.how < 0 || row.how >= WEEK_HOURS) {
+            return;
+        }
+        let cells = this.cells.get(row.dp);
+        if (!cells) {
+            cells = new Float64Array(WEEK_HOURS * FIELDS);
+            for (let how = 0; how < WEEK_HOURS; how++) {
+                cells[how * FIELDS + MIN] = NaN;
+                cells[how * FIELDS + MAX] = NaN;
+            }
+            this.cells.set(row.dp, cells);
+        }
+        const o = row.how * FIELDS;
+        cells[o + N]++;
+        if (row.changes > 0) {
+            cells[o + ACTIVE]++;
+        }
+        cells[o + CHANGES] += row.changes;
+        cells[o + UPDATES] += row.updates;
+        if (row.avg !== null) {
+            const nVal = ++cells[o + N_VAL];
+            const delta = row.avg - cells[o + MEAN];
+            cells[o + MEAN] += delta / nVal;
+            cells[o + M2] += delta * (row.avg - cells[o + MEAN]);
+        }
+        // NaN: nothing yet
+        if (row.min !== null && !(row.min >= cells[o + MIN])) {
+            cells[o + MIN] = row.min;
+        }
+        if (row.max !== null && !(row.max <= cells[o + MAX])) {
+            cells[o + MAX] = row.max;
+        }
+
+        let base = this.bases.get(row.dp);
+        if (!base) {
+            base = { dp: row.dp, since: row.ts, liveSince: null, hours: 0, updates: 0, changes: 0, maxGap: 0 };
+            this.bases.set(row.dp, base);
+        }
+        base.since = Math.min(base.since, row.ts);
+        // updates, changes and gaps only from the live statistics
+        if (!row.bf) {
+            base.liveSince = base.liveSince === null ? row.ts : Math.min(base.liveSince, row.ts);
+            base.hours++;
+            base.updates += row.updates;
+            base.changes += row.changes;
+            base.maxGap = Math.max(base.maxGap, row.maxGap);
+        }
     }
-    if (row.min !== null) {
-        next.min = next.min === null ? row.min : Math.min(next.min, row.min);
+
+    /** The cell of a datapoint in an hour of the week, `null` if it has no statistics there */
+    public cell(dp: number, how: number): ProfileCell | null {
+        const cells = this.cells.get(dp);
+        const o = how * FIELDS;
+        if (!cells || !cells[o + N]) {
+            return null;
+        }
+        const n = cells[o + N];
+        const nVal = cells[o + N_VAL];
+        return {
+            n,
+            nVal,
+            mean: nVal ? cells[o + MEAN] : null,
+            m2: Math.max(0, cells[o + M2]),
+            pActive: cells[o + ACTIVE] / n,
+            avgChanges: cells[o + CHANGES] / n,
+            avgUpdates: cells[o + UPDATES] / n,
+            min: Number.isNaN(cells[o + MIN]) ? null : cells[o + MIN],
+            max: Number.isNaN(cells[o + MAX]) ? null : cells[o + MAX],
+        };
     }
-    if (row.max !== null) {
-        next.max = next.max === null ? row.max : Math.max(next.max, row.max);
+
+    /**
+     * The cells of all datapoints in one hour of the week.
+     *
+     * @param how the hour of the week
+     * @yields {[number, ProfileCell]} `[dp, cell]` of every datapoint with statistics in that hour
+     */
+    public *hour(how: number): Generator<[number, ProfileCell]> {
+        for (const dp of this.cells.keys()) {
+            const cell = this.cell(dp, how);
+            if (cell) {
+                yield [dp, cell];
+            }
+        }
     }
-    return next;
+
+    /** Per datapoint: first hour, and from the live statistics hours, updates, changes, longest gap */
+    public baselines(): Map<number, StatBaseline> {
+        return this.bases;
+    }
 }
 
 /** Statistics of one datapoint in the running hour */
@@ -143,6 +245,8 @@ export class HourStats {
         r.val = val;
         r.min = val;
         r.max = val;
+        // a value from within the hour: the time before is unknown
+        r.since = Math.max(r.since, ts);
         r.lastUpdate = ts;
         r.onSince = val !== null && val > 0 ? lc || ts : null;
     }
@@ -205,6 +309,11 @@ export class HourStats {
 
     public remove(dp: number): void {
         this.running.delete(dp);
+    }
+
+    /** The datapoints with statistics */
+    public ids(): number[] {
+        return [...this.running.keys()];
     }
 
     /**

@@ -1190,6 +1190,7 @@ class RecorderAdapter extends utils.Adapter {
             notify: (_anomaly, text) => this.notifyAnomaly(text),
             report: open => this.reportAnomalies(open),
             now: () => Date.now(),
+            pause: () => new Promise<void>(resolve => setImmediate(resolve)),
         };
     }
 
@@ -1208,6 +1209,10 @@ class RecorderAdapter extends utils.Adapter {
         this.anomalyTimer = this.setInterval(() => {
             detector.check().catch(e => this.log.error(`Anomaly detection: ${(e as Error).message}`));
         }, MINUTE);
+        // the statistics before the first live hour from the recording, and the profiles: in the background
+        detector
+            .prepare(this.stats.start)
+            .catch(e => this.log.error(`Anomaly detection: cannot compute the statistics: ${(e as Error).message}`));
     }
 
     /** The outdoor temperature: the configured state, or else a recorded weather temperature */
@@ -1620,7 +1625,7 @@ class RecorderAdapter extends utils.Adapter {
         }
         try {
             const result = this.storage.retention(this.retentionDays);
-            this.anomalies?.rebuild();
+            void this.anomalies?.rebuild();
             if (result.deletedFiles.length) {
                 this.log.info(`Retention: deleted ${result.deletedFiles.join(', ')}`);
             }

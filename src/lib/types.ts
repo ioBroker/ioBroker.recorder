@@ -123,9 +123,11 @@ export interface AnomalyRecord {
 /** Per datapoint: what is usual, from the statistics of the last weeks (table `baseline`) */
 export interface Baseline {
     dp: number;
-    /** First hour with statistics */
+    /** First hour with statistics, also computed from the recording */
     since: number;
-    /** Hours with statistics */
+    /** First hour of the live statistics, `null` if there are none yet */
+    liveSince: number | null;
+    /** Hours of the live statistics (`hours`, `updates`, `changes`, `maxGap`: live only) */
     hours: number;
     updates: number;
     changes: number;

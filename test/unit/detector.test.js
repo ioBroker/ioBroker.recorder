@@ -166,9 +166,12 @@ describe('anomaly detection: detector', () => {
             now() {
                 return this.time;
             },
+            pause: () => Promise.resolve(),
         };
         detector = new AnomalyDetector(host, stats, { ...DEFAULT_ANOMALY_SETTINGS }, true, 'de');
         await detector.start();
+        // the profiles from the statistics (nothing to compute from the recording)
+        await detector.prepare(stats.start);
     });
 
     afterEach(() => {

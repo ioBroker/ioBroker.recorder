@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import type { AggregateRow } from './aggregator';
 import { initEventsSchema, initMetaSchema } from './schema';
-import { addToProfile, type ProfileCell, type StatHourRow } from './stats';
+import type { ProfileCell, StatHourRow, StoredStatHour } from './stats';
 import {
     openDatabase,
     toNumber,
@@ -112,6 +112,23 @@ function rowToProfile(row: Row): ProfileCell {
         avgUpdates: toNumber(row.avgUpdates) ?? 0,
         min: toNumber(row.min),
         max: toNumber(row.max),
+    };
+}
+
+function rowToStatHour(row: Row): StoredStatHour {
+    return {
+        ts: toNumber(row.ts) ?? 0,
+        dp: toNumber(row.dp) ?? 0,
+        how: toNumber(row.how) ?? 0,
+        min: toNumber(row.min),
+        max: toNumber(row.max),
+        avg: toNumber(row.avg),
+        last: toNumber(row.last),
+        onSec: toNumber(row.onSec) ?? 0,
+        changes: toNumber(row.changes) ?? 0,
+        updates: toNumber(row.updates) ?? 0,
+        maxGap: toNumber(row.maxGap) ?? 0,
+        bf: toNumber(row.bf) === 1,
     };
 }
 
@@ -663,19 +680,15 @@ export class Storage {
     // ---------------------------------------------------------------- statistics and anomalies
 
     /**
-     * Stores the statistics of one hour and adds them to the weekly profile (Welford), in one
-     * transaction.
+     * Stores the statistics of hours (appended: the table is clustered by time).
      *
-     * @param rows the statistics of the hour
+     * @param rows the statistics
+     * @param backfill computed from the recording (`bf = 1`)
      */
-    public writeStatHours(rows: StatHourRow[]): void {
+    public writeStatHours(rows: StatHourRow[], backfill = false): void {
         const db = this.metaDb;
         const insert = db.prepare(
-            'INSERT OR REPLACE INTO stat_hour (ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        );
-        const read = db.prepare(`SELECT ${PROFILE_COLUMNS} FROM profile WHERE dp = ? AND how = ?`);
-        const upsert = db.prepare(
-            `INSERT OR REPLACE INTO profile (${PROFILE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            'INSERT OR REPLACE INTO stat_hour (ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap, bf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
         transaction(db, () => {
             for (const row of rows) {
@@ -691,12 +704,48 @@ export class Storage {
                     row.changes,
                     row.updates,
                     row.maxGap,
+                    backfill ? 1 : 0,
                 );
-                const old = read.get(row.dp, row.how);
-                const cell = addToProfile(old ? rowToProfile(old) : undefined, row);
-                upsert.run(
-                    row.dp,
-                    row.how,
+            }
+        });
+    }
+
+    /** The statistics of all datapoints in `[from, to)`, in the order of time */
+    public readStatHourRange(from: number, to: number): StoredStatHour[] {
+        return this.metaDb
+            .prepare(
+                'SELECT ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap, bf FROM stat_hour WHERE ts >= ? AND ts < ?',
+            )
+            .all(from, to)
+            .map(rowToStatHour);
+    }
+
+    /** The statistics of a datapoint in `[from, to)` */
+    public readStatHours(dp: number, from: number, to: number): StoredStatHour[] {
+        return this.metaDb
+            .prepare(
+                'SELECT ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap, bf FROM stat_hour WHERE ts >= ? AND ts < ? AND dp = ?',
+            )
+            .all(from, to, dp)
+            .map(rowToStatHour);
+    }
+
+    /**
+     * Replaces the profile of one hour of the week (one transaction; the daily rebuild writes the
+     * 168 hours one after the other).
+     *
+     * @param how the hour of the week
+     * @param cells the cells of the datapoints in that hour
+     */
+    public writeProfileHour(how: number, cells: Iterable<[number, ProfileCell]>): void {
+        const db = this.metaDb;
+        const insert = db.prepare(`INSERT INTO profile (${PROFILE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        transaction(db, () => {
+            db.prepare('DELETE FROM profile WHERE how = ?').run(how);
+            for (const [dp, cell] of cells) {
+                insert.run(
+                    dp,
+                    how,
                     cell.n,
                     cell.nVal,
                     cell.mean,
@@ -708,48 +757,6 @@ export class Storage {
                     cell.max,
                 );
             }
-        });
-    }
-
-    /** The statistics of a datapoint in `[from, to)` */
-    public readStatHours(dp: number, from: number, to: number): StatHourRow[] {
-        return this.metaDb
-            .prepare(
-                'SELECT ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap FROM stat_hour WHERE dp = ? AND ts >= ? AND ts < ? ORDER BY ts',
-            )
-            .all(dp, from, to)
-            .map(row => ({
-                ts: toNumber(row.ts) ?? 0,
-                dp: toNumber(row.dp) ?? 0,
-                how: toNumber(row.how) ?? 0,
-                min: toNumber(row.min),
-                max: toNumber(row.max),
-                avg: toNumber(row.avg),
-                last: toNumber(row.last),
-                onSec: toNumber(row.onSec) ?? 0,
-                changes: toNumber(row.changes) ?? 0,
-                updates: toNumber(row.updates) ?? 0,
-                maxGap: toNumber(row.maxGap) ?? 0,
-            }));
-    }
-
-    /**
-     * Computes the weekly profiles anew from the statistics since `from`: so the profile forgets
-     * older weeks (seasons).
-     *
-     * @param from start of the profile period
-     */
-    public rebuildProfiles(from: number): void {
-        const db = this.metaDb;
-        transaction(db, () => {
-            db.exec('DELETE FROM profile');
-            db.prepare(
-                `INSERT INTO profile (${PROFILE_COLUMNS})
-                 SELECT dp, how, COUNT(*), COUNT(avg), AVG(avg),
-                        MAX(0, COALESCE(SUM(avg * avg) - SUM(avg) * SUM(avg) / COUNT(avg), 0)),
-                        AVG(changes > 0), AVG(changes), AVG(updates), MIN(min), MAX(max)
-                 FROM stat_hour WHERE ts >= ? GROUP BY dp, how`,
-            ).run(from);
         });
     }
 
@@ -781,42 +788,27 @@ export class Storage {
         return result;
     }
 
-    /**
-     * Per datapoint from the statistics since `from`: first hour, hours, updates, changes and the
-     * longest time without an update. `onP95` and `onCount` are 0; the caller adds them.
-     *
-     * @param from start of the profile period
-     */
-    public computeBaselines(from: number): Map<number, Baseline> {
-        const result = new Map<number, Baseline>();
-        const sql =
-            'SELECT dp, MIN(ts) AS since, COUNT(*) AS hours, SUM(updates) AS updates, SUM(changes) AS changes, MAX(maxGap) AS maxGap FROM stat_hour WHERE ts >= ? GROUP BY dp';
-        for (const row of this.metaDb.prepare(sql).all(from)) {
-            const dp = toNumber(row.dp) ?? 0;
-            result.set(dp, {
-                dp,
-                since: toNumber(row.since) ?? from,
-                hours: toNumber(row.hours) ?? 0,
-                updates: toNumber(row.updates) ?? 0,
-                changes: toNumber(row.changes) ?? 0,
-                maxGap: toNumber(row.maxGap) ?? 0,
-                onP95: 0,
-                onCount: 0,
-            });
-        }
-        return result;
-    }
-
     /** Replaces all baselines */
     public saveBaselines(baselines: Map<number, Baseline>, now: number = Date.now()): void {
         const db = this.metaDb;
         const insert = db.prepare(
-            'INSERT INTO baseline (dp, since, hours, updates, changes, maxGap, onP95, onCount, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO baseline (dp, since, liveSince, hours, updates, changes, maxGap, onP95, onCount, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
         transaction(db, () => {
             db.exec('DELETE FROM baseline');
             for (const b of baselines.values()) {
-                insert.run(b.dp, b.since, b.hours, b.updates, b.changes, b.maxGap, b.onP95, b.onCount, now);
+                insert.run(
+                    b.dp,
+                    b.since,
+                    b.liveSince,
+                    b.hours,
+                    b.updates,
+                    b.changes,
+                    b.maxGap,
+                    b.onP95,
+                    b.onCount,
+                    now,
+                );
             }
         });
     }
@@ -825,12 +817,13 @@ export class Storage {
     public loadBaselines(): { baselines: Map<number, Baseline>; ts: number | null } {
         const baselines = new Map<number, Baseline>();
         let ts: number | null = null;
-        const sql = 'SELECT dp, since, hours, updates, changes, maxGap, onP95, onCount, ts FROM baseline';
+        const sql = 'SELECT dp, since, liveSince, hours, updates, changes, maxGap, onP95, onCount, ts FROM baseline';
         for (const row of this.metaDb.prepare(sql).all()) {
             const dp = toNumber(row.dp) ?? 0;
             baselines.set(dp, {
                 dp,
                 since: toNumber(row.since) ?? 0,
+                liveSince: toNumber(row.liveSince),
                 hours: toNumber(row.hours) ?? 0,
                 updates: toNumber(row.updates) ?? 0,
                 changes: toNumber(row.changes) ?? 0,
@@ -844,6 +837,17 @@ export class Storage {
             }
         }
         return { baselines, ts };
+    }
+
+    /** The first hour of the statistics, the first live hour and the last hour computed from the recording */
+    public statHourBounds(): { first: number | null; firstLive: number | null; lastBackfill: number | null } {
+        // each one a seek in the primary key or in the index (bf, ts)
+        const value = (sql: string): number | null => toNumber(this.metaDb.prepare(sql).get()?.ts);
+        return {
+            first: value('SELECT MIN(ts) AS ts FROM stat_hour'),
+            firstLive: value('SELECT MIN(ts) AS ts FROM stat_hour WHERE bf = 0'),
+            lastBackfill: value('SELECT MAX(ts) AS ts FROM stat_hour WHERE bf = 1'),
+        };
     }
 
     /** Deletes statistics and anomalies before `cutoff`; the number of deleted rows */
@@ -968,6 +972,38 @@ export class Storage {
         });
         const events = rows.map(rowToEvent);
         return newest ? events.reverse() : events;
+    }
+
+    /** The keyframes in `[from, to)`, sorted by time */
+    public readKeyframes(from: number, to: number): { ts: number; rows: KeyframeRow[] }[] {
+        const keyframes: { ts: number; rows: KeyframeRow[] }[] = [];
+        this.scanWeeks(from, to, false, db => {
+            let current = null as { ts: number; rows: KeyframeRow[] } | null;
+            const sql = 'SELECT ts, dp, val, sval FROM keyframe WHERE ts >= ? AND ts < ? ORDER BY ts';
+            for (const row of db.prepare(sql).all(from, to)) {
+                const ts = toNumber(row.ts) ?? 0;
+                if (current?.ts !== ts) {
+                    current = { ts, rows: [] };
+                    keyframes.push(current);
+                }
+                current.rows.push({ dp: toNumber(row.dp) ?? 0, val: toNumber(row.val), sval: toText(row.sval) });
+            }
+            return true;
+        });
+        return keyframes;
+    }
+
+    /** The 5 minute aggregates of all datapoints with a start in `[from, to)`, sorted by time */
+    public readAllAggregates(from: number, to: number): AggregateRow[] {
+        const rows: AggregateRow[] = [];
+        const sql = `SELECT ${COLUMNS.agg5} FROM agg5 WHERE ts >= ? AND ts < ? ORDER BY ts`;
+        this.scanWeeks(from, to, false, db => {
+            for (const row of db.prepare(sql).all(from, to)) {
+                rows.push(rowToAggregate(row));
+            }
+            return true;
+        });
+        return rows;
     }
 
     /** Per datapoint the newest 5 minute aggregate with a start in `[from, to)` */

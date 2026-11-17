@@ -96,6 +96,19 @@ export function isLearned(baseline: Baseline | undefined, now: number, learnDays
     return !!baseline && now - baseline.since >= learnDays * DAY;
 }
 
+/**
+ * Are the updates and changes of a datapoint known (silent sensor, racing datapoint)? Only the live
+ * statistics count them; half of the learning period suffices, as they need no weekly profile.
+ */
+export function ratesLearned(baseline: Baseline | undefined, now: number, learnDays: number): boolean {
+    return (
+        !!baseline &&
+        baseline.liveSince !== null &&
+        baseline.hours > 0 &&
+        now - baseline.liveSince >= (learnDays * DAY) / 2
+    );
+}
+
 /** The hour of the week and its neighbours */
 export function neighbourHours(how: number): number[] {
     return [-1, 0, 1].map(k => (how + k + WEEK_HOURS) % WEEK_HOURS);

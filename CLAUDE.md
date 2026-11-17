@@ -62,9 +62,10 @@ gitignored, so `npm run build` must run before `npm pack`.
 | `src/lib/walk.ts` | walk into the past: `readSnapshot`, `readChanges` (replay), `readEventList` (journal), `readTimeline` |
 | `src/lib/walk-types.ts` | request and answer types of `getSnapshot` / `getEvents` / `getTimeline`, also imported by the tab |
 | `src/lib/simulation.ts` | presence simulation, pure: `isSimulatable`, `collectActions`, noon-to-noon days, `pickSourceDay`, `planDay`, `sunsetOf` |
-| `src/lib/stats.ts` | `HourStats` (statistics of the running hour per dp), `addToProfile` (Welford), `hourOfWeek` (local, Monday 0) |
+| `src/lib/stats.ts` | `HourStats` (statistics of the running hour per dp), `ProfileBuilder` (profiles and baselines row by row, Welford), `hourOfWeek` (local, Monday 0) |
+| `src/lib/backfill.ts` | statistics of the past from the recording: `backfillRange`, `backfillStatistics` |
 | `src/lib/anomaly.ts` | anomaly rules, pure: `poolProfile`, `unusualValue`, `rareActivity`, `silentLimit`, `longLimit`, `isRacing`, `AnomalyTracker` (quiet time, ack) |
-| `src/lib/detector.ts` | `AnomalyDetector` behind `DetectorHost`: hourly rows, daily rebuild, minute check, texts en/de, `renderInfo` |
+| `src/lib/detector.ts` | `AnomalyDetector` behind `DetectorHost`: hourly rows, `prepare` (backfill), daily rebuild, minute check, texts en/de, `renderInfo` |
 | `src/lib/simulator.ts` | `PresenceSimulation` (timers, switching, stop) behind `SimulationHost`, `planSimulatedDay`, `renderPlan` |
 | `src-tab/` | admin tab "Time machine" (React 19, MUI, gui-components, vite): `TimeMachine`, `Timeline`, `RoomTiles`, `Journal` |
 | `tasks.ts` | build of the tab into `admin/` |
@@ -83,7 +84,7 @@ gitignored, so `npm run build` must run before `npm pack`.
 - Data directory: `utils.getAbsoluteInstanceDataDir(this)` = `iobroker-data/recorder.0/`.
 - `meta.sqlite`: tables `dp` (master data; `dp.id` is the key used everywhere), `src` (deduplicated
   `from`/`user`), `rate` (measured changes per minute, high-frequency flag; schema v2), `stat_hour`,
-  `profile`, `baseline`, `anomaly` (M6, schema v3). Schema changes are migrations in `schema.ts` (`META_MIGRATIONS`), one per
+  `profile`, `baseline`, `anomaly` (M6, schema v3 to v5). Schema changes are migrations in `schema.ts` (`META_MIGRATIONS`), one per
   version in `PRAGMA user_version`.
 - `ev-YYYY-Www.sqlite`: `ev` (events), `keyframe`, `agg5` (M3). Weeks are **UTC** (Monday 00:00 UTC),
   so the file of a timestamp does not depend on time zone or DST.
@@ -238,14 +239,30 @@ them all; `{ enabled: true }` without `mode` written by its "add state" dialog m
 - **Statistics** (`HourStats`, always, also with `anomalies` off): per dp and hour the time-weighted
   mean, min, max, last, seconds active (`isActive`: truthy number), changes, updates (every
   `onStateChange`, also unchanged values) and the longest gap between updates. Closed at every full
-  hour into `stat_hour` (kept `STATISTICS_DAYS` = 365) plus a Welford update of `profile`
-  (`dp`, `how` = hour of the week, local time). A restart loses the running hour.
-- **Daily rebuild** (with the retention and at start if older than a day): `profile` from
-  `stat_hour` of the last `PROFILE_WEEKS` = 8 weeks (forgets seasons), `baseline` per dp (first
-  hour = `since`, hours, updates, changes, longest gap) and, from the raw events, the durations of
-  the active state of windows, doors and lights (`onP95`, `onCount`).
-- **Learned**: `since` at least `anoLearnDays` (14) days ago. Profiles are pooled: the hour of the week
-  ±1 hour and the same hour ±1 on all 7 days (`poolProfile`, loaded once per hour for all dps).
+  hour into `stat_hour` (kept `STATISTICS_DAYS` = 365). A restart loses the running hour.
+- **Tables** (schema v5): `stat_hour` is `WITHOUT ROWID` with `PRIMARY KEY (ts, dp)`, clustered by
+  time: the hourly rows and the backfill are appended (few pages, small WAL; a key `(dp, ts)` costs
+  ~1500 scattered pages per hour), index `(bf, ts)` for `statHourBounds`. `profile` is
+  `PRIMARY KEY (how, dp)`, so the detector reads the hours it needs. No hourly profile update.
+- **Backfill** (`prepare` after the start, in the background): the hours from the start of the
+  recording (at most 8 weeks) to the first live hour are computed from events, keyframes and
+  `agg5` with the same `HourStats`, in steps of 2 hours (stored per step, so an interrupted run
+  continues after the last backfilled hour). Hours without a keyframe (instance not running) give
+  no rows; only a keyframe of a start (not at the full hour, or after a gap) changes values, an
+  hourly one holds values within the dead band. Aggregated dps: the 5 minute means, min/max of
+  `agg5`. Rows are marked `bf = 1`: the recording knows no updates without a change and no changes
+  held back by the filter, so updates, changes, gaps and `liveSince` of the baseline come from
+  live rows only. Measured: 8 weeks of 1500 dps (2 million rows) in 48 s, longest block 0.3 s.
+- **Daily rebuild** (`rebuild`, with the retention, after the backfill, at start if older than a
+  day; a call while running runs it once more): `ProfileBuilder` reads `stat_hour` of the last
+  `PROFILE_WEEKS` = 8 weeks (forgets seasons) in steps of 6 hours, the durations of the active state
+  of windows, doors and lights (`onP95`, `onCount`) from the raw events week by week, then writes
+  the profile hour of the week by hour of the week, with pauses (`DetectorHost.pause`). Measured:
+  2 million rows in 16 s, longest block 0.13 s (one `GROUP BY dp, how` took 20 to 60 s).
+- **Learned**: `since` (backfilled hours count) at least `anoLearnDays` (14) days ago. Silent sensor
+  and racing need the counted updates: `ratesLearned`, `liveSince` at least half of that ago.
+  Profiles are pooled: the hour of the week ±1 hour and the same hour ±1 on all 7 days
+  (`poolProfile`, loaded once per hour for all dps).
 - **Rules** (texts with room + name, `durationText`):
   - `value` (continuous/aggregated numbers that are levels, `hasLevel`: no counters, energy, time):
     z > `anoZ` against the pooled mean and outside the observed min/max, for `anoValueMinutes`.

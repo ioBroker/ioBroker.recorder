@@ -137,7 +137,8 @@ CREATE TABLE profile (                   -- one hour of the week of one datapoin
     PRIMARY KEY (dp, how)
 );
 
-CREATE TABLE IF NOT EXISTS baseline (    -- per datapoint, computed daily from stat_hour and the events
+DROP TABLE IF EXISTS baseline;
+CREATE TABLE baseline (                  -- per datapoint, computed daily from stat_hour and the events
     dp      INTEGER PRIMARY KEY,
     since   INTEGER,                     -- first hour with statistics
     hours   INTEGER,                     -- hours with statistics in the profile period
@@ -162,8 +163,64 @@ CREATE TABLE IF NOT EXISTS anomaly (
 CREATE INDEX IF NOT EXISTS anomaly_ts ON anomaly(ts);
 `;
 
+/**
+ * Version 4: statistics computed afterwards from the recording (backfill). The recording knows no
+ * updates without a change of value and no changes held back by the frequency filter, so the
+ * baseline takes updates, changes and gaps from the live rows only.
+ */
+const META_SCHEMA_V4 = `
+ALTER TABLE stat_hour ADD COLUMN bf INTEGER NOT NULL DEFAULT 0;   -- 1: computed from the recording
+ALTER TABLE baseline ADD COLUMN liveSince INTEGER;                -- first hour of the live statistics
+`;
+
+/**
+ * Version 5: `stat_hour` clustered by time, so that the hourly rows and the backfill are appended
+ * (few pages per write, small WAL) and the daily rebuild reads it in order; `profile` clustered
+ * by the hour of the week, so that the detector reads the hours it needs. The profile is no longer
+ * updated every hour, only rebuilt daily: the baseline is cleared, so the next start rebuilds it.
+ */
+const META_SCHEMA_V5 = `
+CREATE TABLE stat_hour_v5 (
+    ts      INTEGER NOT NULL,            -- start of the hour
+    dp      INTEGER NOT NULL,
+    how     INTEGER,                     -- local hour of the week 0..167 (Monday 00:00 = 0)
+    min     REAL,
+    max     REAL,
+    avg     REAL,                        -- time-weighted mean
+    last    REAL,
+    onSec   INTEGER,                     -- seconds with a value > 0 (on, open)
+    changes INTEGER,
+    updates INTEGER,                     -- also without a change of value
+    maxGap  INTEGER,                     -- longest time without an update that ended in this hour, ms
+    bf      INTEGER NOT NULL DEFAULT 0,  -- 1: computed from the recording
+    PRIMARY KEY (ts, dp)
+) WITHOUT ROWID;
+INSERT INTO stat_hour_v5 SELECT ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap, bf FROM stat_hour;
+DROP TABLE stat_hour;
+ALTER TABLE stat_hour_v5 RENAME TO stat_hour;
+CREATE INDEX stat_hour_bf ON stat_hour(bf, ts);
+
+DROP TABLE profile;
+CREATE TABLE profile (                   -- one hour of the week of one datapoint
+    how        INTEGER NOT NULL,
+    dp         INTEGER NOT NULL,
+    n          INTEGER,                  -- hours observed
+    nVal       INTEGER,                  -- hours with a numeric mean
+    mean       REAL,
+    m2         REAL,                     -- Welford: sum of squared deviations
+    pActive    REAL,                     -- share of hours with a change
+    avgChanges REAL,
+    avgUpdates REAL,
+    min        REAL,
+    max        REAL,
+    PRIMARY KEY (how, dp)
+) WITHOUT ROWID;
+
+DELETE FROM baseline;
+`;
+
 /** Index = version - 1. Each migration runs once, in one transaction with the version update. */
-const META_MIGRATIONS = [META_SCHEMA_V1, META_SCHEMA_V2, META_SCHEMA_V3];
+const META_MIGRATIONS = [META_SCHEMA_V1, META_SCHEMA_V2, META_SCHEMA_V3, META_SCHEMA_V4, META_SCHEMA_V5];
 const EVENTS_MIGRATIONS = [EVENTS_SCHEMA_V1];
 
 function getVersion(db: SqliteDatabase): number {

@@ -16,6 +16,7 @@ import {
     poolProfile,
     RARE_CATEGORIES,
     rareActivity,
+    ratesLearned,
     silentLimit,
     unusualValue,
     usualGap,
@@ -24,8 +25,9 @@ import {
     type AnomalySettings,
     type HourProfile,
 } from './anomaly';
+import { backfillRange, backfillStatistics } from './backfill';
 import { escapeHtml, format } from './preview';
-import { hourOfWeek, type HourStats, type StatHourRow } from './stats';
+import { hourOfWeek, ProfileBuilder, WEEK_HOURS, type HourStats, type StatHourRow } from './stats';
 import type { Storage } from './storage';
 import { DpClass, type AnomalyRecord, type AnomalyRule, type Baseline, type DpInfo } from './types';
 
@@ -56,6 +58,8 @@ export interface DetectorHost {
     /** The open anomalies changed */
     report(open: AnomalyRecord[]): Promise<void>;
     now(): number;
+    /** Gives the event loop a chance during long computations */
+    pause(): Promise<void>;
 }
 
 const TEXTS = {
@@ -82,6 +86,8 @@ const TEXTS = {
         learning:
             'Profiles: %learned of %total datapoints are learned. The others learn their usual behaviour for %days days (complete from %ready).',
         learned: 'Profiles: all %total datapoints are learned.',
+        backfill: 'The statistics before %date were computed from the existing recording.',
+        rates: 'The rules "Silent sensor" and "Racing datapoint" need the counted updates, which only the running instance collects: they start on %ready.',
         open: 'Open anomalies',
         recent: 'Last 7 days',
         none: 'None.',
@@ -119,6 +125,8 @@ const TEXTS = {
         learning:
             'Profile: %learned von %total Datenpunkten sind gelernt. Die übrigen lernen %days Tage lang ihr übliches Verhalten (vollständig ab %ready).',
         learned: 'Profile: alle %total Datenpunkte sind gelernt.',
+        backfill: 'Die Statistik vor dem %date wurde aus der vorhandenen Aufzeichnung nachberechnet.',
+        rates: 'Die Regeln „Stiller Sensor“ und „Rasender Datenpunkt“ brauchen die gezählten Meldungen, die nur die laufende Instanz erfasst: sie starten am %ready.',
         open: 'Offene Anomalien',
         recent: 'Letzte 7 Tage',
         none: 'Keine.',
@@ -194,6 +202,10 @@ export class AnomalyDetector {
     /** The profile of every datapoint around the loaded hour of the week */
     private profiles = new Map<number, HourProfile>();
     private profileHow = -1;
+    /** The running rebuild of the profiles */
+    private rebuilding: Promise<void> | null = null;
+    /** Rebuild again after the running one (new statistics came in) */
+    private rebuildAgain = false;
 
     public constructor(
         private readonly host: DetectorHost,
@@ -215,18 +227,14 @@ export class AnomalyDetector {
         return textsOf(this.lang);
     }
 
-    /** Loads baselines and open anomalies; computes the profiles if they are older than a day */
+    /** Loads baselines, profiles and open anomalies (`prepare` computes what is missing) */
     public async start(): Promise<void> {
         const storage = this.host.storage();
         if (!storage) {
             return;
         }
         const now = this.host.now();
-        const stored = storage.loadBaselines();
-        this.baselines = stored.baselines;
-        if (stored.ts === null || now - stored.ts > DAY) {
-            this.rebuild();
-        }
+        this.baselines = storage.loadBaselines().baselines;
         this.tracker.restore(
             storage.readAnomalies(0, now + 1, 'running'),
             storage.readAnomalies(now - this.tracker.quiet, now + 1),
@@ -276,7 +284,7 @@ export class AnomalyDetector {
             const baseline = this.baselines.get(row.dp);
             if (
                 baseline &&
-                isLearned(baseline, now, this.settings.learnDays) &&
+                ratesLearned(baseline, now, this.settings.learnDays) &&
                 isRacing(row.changes, baseline, this.settings.racingFactor)
             ) {
                 const dp = storage.getDpById(row.dp);
@@ -296,21 +304,96 @@ export class AnomalyDetector {
     }
 
     /**
-     * Daily: profiles and baselines anew from the last `PROFILE_WEEKS` weeks; deletes statistics
-     * and anomalies older than `STATISTICS_DAYS`.
+     * In the background after the start: the statistics before the first live hour from the
+     * recording (once; an interrupted run continues at the next start), then the profiles if they
+     * are new or older than a day.
+     *
+     * @param liveStart start of the running hour of the live statistics
      */
-    public rebuild(): void {
+    public async prepare(liveStart: number): Promise<void> {
         const storage = this.host.storage();
         if (!storage) {
             return;
         }
+        let computed = false;
+        const range = backfillRange(storage, liveStart, this.host.now(), PROFILE_WEEKS * 7);
+        if (range) {
+            const started = Date.now();
+            this.host.log.info(
+                `Anomaly detection: computing the statistics from ${dateTimeOf(range.from)} to ${dateTimeOf(range.to)} from the recording`,
+            );
+            const result = await backfillStatistics(
+                storage,
+                range,
+                () => this.host.pause(),
+                () => this.host.storage() !== storage,
+            );
+            if (!result) {
+                return;
+            }
+            computed = true;
+            this.host.log.info(
+                `Anomaly detection: statistics of ${result.hours} hours (${result.rows} rows) computed in ${
+                    Math.round((Date.now() - started) / 100) / 10
+                } s`,
+            );
+        }
+        const ts = storage.loadBaselines().ts;
+        if (computed || ts === null || this.host.now() - ts > DAY) {
+            await this.rebuild();
+        }
+    }
+
+    /**
+     * Daily: profiles and baselines anew from the last `PROFILE_WEEKS` weeks (so they forget older
+     * weeks: seasons); deletes statistics and anomalies older than `STATISTICS_DAYS`. Reads and
+     * writes in small steps with pauses. A call during a rebuild runs it once more afterwards.
+     */
+    public rebuild(): Promise<void> {
+        if (this.rebuilding) {
+            this.rebuildAgain = true;
+            return this.rebuilding;
+        }
+        this.rebuilding = (async () => {
+            try {
+                do {
+                    this.rebuildAgain = false;
+                    await this.computeProfiles();
+                } while (this.rebuildAgain && this.host.storage());
+            } finally {
+                this.rebuilding = null;
+            }
+        })();
+        return this.rebuilding;
+    }
+
+    private async computeProfiles(): Promise<void> {
+        const storage = this.host.storage();
+        if (!storage) {
+            return;
+        }
+        const aborted = (): boolean => this.host.storage() !== storage;
         const now = this.host.now();
         const from = now - PROFILE_WEEKS * 7 * DAY;
         const started = Date.now();
         try {
-            storage.rebuildProfiles(from);
-            const baselines = storage.computeBaselines(from);
-            // durations of the active state of windows, doors and lights
+            // the statistics in steps of 6 hours
+            const builder = new ProfileBuilder();
+            for (let t = from; t <= now; t += 6 * HOUR) {
+                for (const row of storage.readStatHourRange(t, t + 6 * HOUR)) {
+                    builder.add(row);
+                }
+                await this.host.pause();
+                if (aborted()) {
+                    return;
+                }
+            }
+            const baselines = new Map<number, Baseline>();
+            for (const [dp, base] of builder.baselines()) {
+                baselines.set(dp, { ...base, onP95: 0, onCount: 0 });
+            }
+
+            // durations of the active state of windows, doors and lights, week by week
             const dps = this.host
                 .datapoints()
                 .filter(
@@ -318,13 +401,20 @@ export class AnomalyDetector {
                 );
             if (dps.length) {
                 const byDp = new Map<number, { ts: number; val: number | null }[]>();
-                for (const event of storage.readAllEvents(from, now, { dps: dps.map(dp => dp.id) })) {
-                    let list = byDp.get(event.dp);
-                    if (!list) {
-                        list = [];
-                        byDp.set(event.dp, list);
+                const filter = { dps: dps.map(dp => dp.id) };
+                for (let t = from; t <= now; t += 7 * DAY) {
+                    for (const event of storage.readAllEvents(t, Math.min(t + 7 * DAY, now + 1), filter)) {
+                        let list = byDp.get(event.dp);
+                        if (!list) {
+                            list = [];
+                            byDp.set(event.dp, list);
+                        }
+                        list.push({ ts: event.ts, val: event.val });
                     }
-                    list.push(event);
+                    await this.host.pause();
+                    if (aborted()) {
+                        return;
+                    }
                 }
                 for (const [dp, events] of byDp) {
                     const baseline = baselines.get(dp);
@@ -335,6 +425,17 @@ export class AnomalyDetector {
                         );
                         baseline.onCount = durations.length;
                         baseline.onP95 = Math.round(percentile(durations, 0.95));
+                    }
+                }
+            }
+
+            // the profile hour by hour of the week
+            for (let how = 0; how < WEEK_HOURS; how++) {
+                storage.writeProfileHour(how, builder.hour(how));
+                if (how % 8 === 7) {
+                    await this.host.pause();
+                    if (aborted()) {
+                        return;
                     }
                 }
             }
@@ -349,7 +450,9 @@ export class AnomalyDetector {
         } catch (e) {
             this.host.log.error(`Cannot compute the profiles: ${(e as Error).message}`);
         }
-        this.loadProfiles(now, true);
+        if (!aborted()) {
+            this.loadProfiles(this.host.now(), true);
+        }
     }
 
     private ruleEnabled(rule: AnomalyRule): boolean {
@@ -370,7 +473,7 @@ export class AnomalyDetector {
         for (const dp of dps) {
             const baseline = this.baselines.get(dp.id);
             const learned = isLearned(baseline, now, s.learnDays);
-            const limit = learned && baseline ? silentLimit(baseline, s) : null;
+            const limit = baseline && ratesLearned(baseline, now, s.learnDays) ? silentLimit(baseline, s) : null;
             const last = this.stats.lastUpdate(dp.id);
             const silent = limit !== null && last !== null && now - last > limit;
             if (s.value && hasLevel(dp)) {
@@ -557,6 +660,7 @@ export class AnomalyDetector {
         id: string;
         name: string | null;
         learned: boolean;
+        ratesLearned: boolean;
         baseline: Baseline | null;
         profile: {
             how: number;
@@ -592,6 +696,7 @@ export class AnomalyDetector {
             id: dp.oid,
             name: dp.name,
             learned: isLearned(baseline ?? undefined, this.host.now(), this.settings.learnDays),
+            ratesLearned: ratesLearned(baseline ?? undefined, this.host.now(), this.settings.learnDays),
             baseline,
             profile,
         };
@@ -631,6 +736,21 @@ export class AnomalyDetector {
         }
         if (!storage) {
             return html.join('');
+        }
+        const bounds = storage.statHourBounds();
+        if (bounds.lastBackfill !== null) {
+            const until = bounds.firstLive ?? bounds.lastBackfill + HOUR;
+            html.push(`<p>${escapeHtml(format(t.backfill, { date: dateTimeOf(until) }))}</p>`);
+            let ready = 0;
+            for (const dp of dps) {
+                const baseline = this.baselines.get(dp.id);
+                if (!ratesLearned(baseline, now, this.settings.learnDays)) {
+                    ready = Math.max(ready, (baseline?.liveSince ?? until) + (this.settings.learnDays * DAY) / 2);
+                }
+            }
+            if (ready > now) {
+                html.push(`<p>${escapeHtml(format(t.rates, { ready: dateTimeOf(ready).substring(0, 10) }))}</p>`);
+            }
         }
         const cell = 'style="padding: 2px 8px; border-bottom: 1px solid rgba(128,128,128,0.3); text-align: left"';
         const table = (anomalies: AnomalyRecord[], withStatus: boolean): string => {
