@@ -11,3 +11,8 @@ admin/i18n/*/flat.txt
 
 #ignore .commitinfo created by ioBroker release script
 .commitinfo
+
+# the admin tab, built from src-tab by tasks.ts
+admin/tab.html
+admin/assets/
+src-tab/build/

@@ -17,7 +17,7 @@ import {
     type DpFilter,
     type RoleRule,
 } from './lib/filter';
-import { parseHistoryRequest, readHistory } from './lib/history';
+import { parseHistoryRequest, readHistory, toTimestamp } from './lib/history';
 import { estimateSize, renderHighFrequency, renderPreview, summaryText } from './lib/preview';
 import {
     aliasTarget,
@@ -33,6 +33,8 @@ import { DRIVER_NAME } from './lib/sqlite';
 import { Storage } from './lib/storage';
 import { DpClass, type DpInfo, type Keyframe, type RateInfo, type RecordedEvent, type StoredValue } from './lib/types';
 import { encodeValue, sameValue } from './lib/values';
+import { readChanges, readEventList, readSnapshot, readTimeline, type PendingData } from './lib/walk';
+import type { EventsRequest, SnapshotEntry, SnapshotRequest, TimelineRequest } from './lib/walk-types';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -53,6 +55,11 @@ const DEFAULT_HIGH_RATE = 6;
 const DEFAULT_BURST_LIMIT = 60;
 /** At most one warning per throttled datapoint and hour */
 const THROTTLE_LOG_INTERVAL = HOUR;
+/** The replay moves forward once per second, by `speed` seconds */
+const REPLAY_TICK = 1000;
+const MIN_REPLAY_SPEED = 0.1;
+const MAX_REPLAY_SPEED = 3600;
+const DEFAULT_REPLAY_SPEED = 60;
 /** Object types the selection looks at */
 const SELECTION_TYPES = new Set<string>(['state', 'channel', 'device', 'folder', 'enum']);
 
@@ -153,6 +160,13 @@ class RecorderAdapter extends utils.Adapter {
     private lang: ioBroker.Languages = 'en';
     private selectionRunning = false;
     private selectionPending = false;
+    /** Replay: the current replay time, its speed (factor of real time) and its timer */
+    private replayTime = 0;
+    private replaySpeed = DEFAULT_REPLAY_SPEED;
+    private replayTimer: ioBroker.Interval | null | undefined = null;
+    private replayStepping = false;
+    /** Mirror state (own ID) by object ID, if `mirrorStates` is on */
+    private readonly mirrors = new Map<string, string>();
 
     private flushTimer: ioBroker.Interval | null | undefined = null;
     private keyframeTimer: ioBroker.Timeout | null | undefined = null;
@@ -217,6 +231,7 @@ class RecorderAdapter extends utils.Adapter {
         this.scheduleKeyframe();
         this.scheduleRetention();
         this.scheduleMidnight();
+        await this.initReplay();
         await this.updateInfoStates(true);
     }
 
@@ -363,6 +378,15 @@ class RecorderAdapter extends utils.Adapter {
         if (added.length) {
             await this.subscribeForeignStatesAsync(added);
             await this.readInitialValues(added);
+            if (this.flushTimer) {
+                // added while running: a keyframe must hold every datapoint, so that a snapshot finds them
+                this.flush(this.createKeyframe());
+            }
+        }
+        try {
+            await this.syncMirrors();
+        } catch (e) {
+            this.log.error(`Cannot update the mirror states: ${(e as Error).message}`);
         }
 
         if (!this.dps.size) {
@@ -421,6 +445,21 @@ class RecorderAdapter extends utils.Adapter {
 
             case 'recalculate':
                 void this.updateSelection().then(() => respond({ result: `${this.dps.size} states` }));
+                break;
+
+            // walk into the past
+            case 'getSnapshot':
+                respond(
+                    this.walk(storage => readSnapshot(storage, obj.message as SnapshotRequest, this.pendingData())),
+                );
+                break;
+
+            case 'getEvents':
+                respond(this.walk(storage => readEventList(storage, obj.message as EventsRequest, this.pendingData())));
+                break;
+
+            case 'getTimeline':
+                respond(this.walk(storage => readTimeline(storage, obj.message as TimelineRequest)));
                 break;
 
             // the commands of history, sql and influxdb
@@ -578,9 +617,253 @@ class RecorderAdapter extends utils.Adapter {
         };
     }
 
+    // ---------------------------------------------------------------- walk into the past
+
+    /** Runs a reading command; errors become `{ error }` */
+    private walk<T>(fn: (storage: Storage) => T): T | { error: string } {
+        if (!this.storage) {
+            return { error: 'The instance is not ready yet' };
+        }
+        try {
+            return fn(this.storage);
+        } catch (e) {
+            this.log.error(`Cannot read the recording: ${(e as Error).message}`);
+            return { error: String(e) };
+        }
+    }
+
+    /** Data that is not written yet; the readers include it */
+    private pendingData(): PendingData {
+        return { events: this.buffer, aggregates: this.aggregator.pendingAll() };
+    }
+
+    /** Restores time and speed of the replay; a running replay does not survive a restart */
+    private async initReplay(): Promise<void> {
+        const time = await this.getStateAsync('replay.time');
+        const speed = await this.getStateAsync('replay.speed');
+        this.replayTime = Number(time?.val) || 0;
+        this.replaySpeed = this.toReplaySpeed(speed?.val) ?? DEFAULT_REPLAY_SPEED;
+        await this.setStateAsync('replay.active', false, true);
+        await this.subscribeStatesAsync('replay.*');
+    }
+
+    private toReplaySpeed(value: unknown): number | undefined {
+        const speed = Number(value);
+        if (!Number.isFinite(speed) || speed <= 0) {
+            return undefined;
+        }
+        return Math.min(MAX_REPLAY_SPEED, Math.max(MIN_REPLAY_SPEED, speed));
+    }
+
+    /** A replay time within the recorded period */
+    private clampReplayTime(ts: number): number {
+        const now = Date.now();
+        const oldest = this.storage?.oldestTs() ?? now;
+        return Math.max(oldest, Math.min(ts, now));
+    }
+
+    /** Commands to `replay.active`, `replay.time` and `replay.speed` */
+    private async onReplayCommand(id: string, state: ioBroker.State): Promise<void> {
+        try {
+            switch (id) {
+                case 'replay.time': {
+                    const ts = toTimestamp(state.val);
+                    if (ts === undefined) {
+                        this.log.warn(`Invalid replay time: ${String(state.val)}`);
+                        await this.setStateAsync('replay.time', this.replayTime, true);
+                        break;
+                    }
+                    this.replayTime = this.clampReplayTime(ts);
+                    await this.setStateAsync('replay.time', this.replayTime, true);
+                    // a jump: the mirrors show the state at the new time
+                    await this.mirrorSnapshot(this.replayTime);
+                    break;
+                }
+
+                case 'replay.speed':
+                    this.replaySpeed = this.toReplaySpeed(state.val) ?? this.replaySpeed;
+                    await this.setStateAsync('replay.speed', this.replaySpeed, true);
+                    break;
+
+                case 'replay.active':
+                    if (state.val === true || state.val === 'true' || state.val === 1) {
+                        await this.startReplay();
+                    } else {
+                        await this.stopReplay();
+                    }
+                    break;
+            }
+        } catch (e) {
+            this.log.error(`Replay: ${(e as Error).message}`);
+        }
+    }
+
+    private async startReplay(): Promise<void> {
+        if (!this.storage) {
+            return;
+        }
+        const now = Date.now();
+        if (!this.replayTime || this.replayTime >= now - REPLAY_TICK) {
+            // no time chosen, or at the present: one day back
+            this.replayTime = now - DAY;
+        }
+        this.replayTime = this.clampReplayTime(this.replayTime);
+        await this.mirrorSnapshot(this.replayTime);
+        if (this.replayTimer) {
+            this.clearInterval(this.replayTimer);
+        }
+        this.replayTimer = this.setInterval(() => void this.replayStep(), REPLAY_TICK);
+        await this.setStateAsync('replay.time', this.replayTime, true);
+        await this.setStateAsync('replay.active', true, true);
+        this.log.info(
+            `Replay from ${new Date(this.replayTime).toISOString()} at ${this.replaySpeed}x${
+                this.mirrors.size ? `, ${this.mirrors.size} mirror states` : ', without mirror states'
+            }`,
+        );
+    }
+
+    private async stopReplay(): Promise<void> {
+        if (this.replayTimer) {
+            this.clearInterval(this.replayTimer);
+            this.replayTimer = null;
+        }
+        await this.setStateAsync('replay.active', false, true);
+    }
+
+    /** One step of the replay: only the changes since the last step are written to the mirrors */
+    private async replayStep(): Promise<void> {
+        if (this.replayStepping || !this.storage || !this.replayTimer) {
+            return;
+        }
+        this.replayStepping = true;
+        try {
+            const now = Date.now();
+            const from = this.replayTime;
+            const to = Math.min(from + this.replaySpeed * REPLAY_TICK, now);
+            if (this.mirrors.size) {
+                await this.writeMirrors(readChanges(this.storage, from, to, this.pendingData()), to);
+            }
+            this.replayTime = to;
+            await this.setStateAsync('replay.time', to, true);
+            if (to >= now) {
+                this.log.info('The replay reached the present');
+                await this.stopReplay();
+            }
+        } catch (e) {
+            this.log.error(`Replay: ${(e as Error).message}`);
+        } finally {
+            this.replayStepping = false;
+        }
+    }
+
+    /** Writes the state at `ts` to all mirror states */
+    private async mirrorSnapshot(ts: number): Promise<void> {
+        if (this.storage && this.mirrors.size) {
+            await this.writeMirrors(readSnapshot(this.storage, { ts }, this.pendingData()).states, ts);
+        }
+    }
+
+    private async writeMirrors(entries: SnapshotEntry[], fallbackTs: number): Promise<void> {
+        for (const entry of entries) {
+            const mirror = this.mirrors.get(entry.id);
+            if (!mirror) {
+                continue;
+            }
+            const val = entry.val !== null && typeof entry.val === 'object' ? JSON.stringify(entry.val) : entry.val;
+            // the time of the change in the past, so that "last changed" in a vis view is right
+            await this.setStateAsync(mirror, { val, ack: true, ts: entry.lc ?? fallbackTs });
+        }
+    }
+
+    /** `recorder.0.mirror.<object ID with _>` */
+    private mirrorIdOf(oid: string): string {
+        return `mirror.${oid.replace(this.FORBIDDEN_CHARS, '_').replace(/[.\s]/g, '_')}`;
+    }
+
+    /** The mirror object of a recorded datapoint: like the original, but read-only */
+    private mirrorObject(oid: string): ioBroker.SettableStateObject {
+        const original = this.objects[oid]?.common as Partial<ioBroker.StateCommon> | undefined;
+        const common: ioBroker.StateCommon = {
+            name: original?.name ?? this.dps.get(oid)?.name ?? oid,
+            type: original?.type ?? 'mixed',
+            role: original?.role || 'state',
+            read: true,
+            write: false,
+        };
+        if (original?.unit) {
+            common.unit = original.unit;
+        }
+        if (original?.states) {
+            common.states = original.states;
+        }
+        if (typeof original?.min === 'number') {
+            common.min = original.min;
+        }
+        if (typeof original?.max === 'number') {
+            common.max = original.max;
+        }
+        return { type: 'state', common, native: { id: oid } };
+    }
+
+    /**
+     * With `mirrorStates` a read-only copy of every recorded datapoint under `mirror.*`, which the
+     * replay writes: a vis view on the mirrors becomes a time machine. Without it, the mirrors are
+     * deleted.
+     */
+    private async syncMirrors(): Promise<void> {
+        const enabled = this.config.mirrorStates === true || (this.config.mirrorStates as unknown) === 'true';
+        const prefix = `${this.namespace}.mirror.`;
+        const view = await this.getObjectViewAsync('system', 'state', {
+            startkey: prefix,
+            endkey: `${prefix}香`,
+        });
+        const existing = new Set(view.rows.map(row => row.id));
+        this.mirrors.clear();
+        if (!enabled) {
+            if (existing.size || (await this.getObjectAsync('mirror'))) {
+                await this.delObjectAsync('mirror', { recursive: true });
+                this.log.info('Deleted the mirror states');
+            }
+            return;
+        }
+        await this.setObjectNotExistsAsync('mirror', {
+            type: 'folder',
+            common: { name: 'Mirror states for the replay' },
+            native: {},
+        });
+        const wanted = new Set<string>();
+        let created = 0;
+        for (const oid of this.dps.keys()) {
+            const mirror = this.mirrorIdOf(oid);
+            this.mirrors.set(oid, mirror);
+            wanted.add(`${this.namespace}.${mirror}`);
+            if (!existing.has(`${this.namespace}.${mirror}`)) {
+                await this.setObjectAsync(mirror, this.mirrorObject(oid));
+                created++;
+            }
+        }
+        let deleted = 0;
+        for (const id of existing) {
+            if (!wanted.has(id)) {
+                await this.delForeignObjectAsync(id);
+                deleted++;
+            }
+        }
+        if (created || deleted) {
+            this.log.info(`Mirror states: ${created} created, ${deleted} deleted`);
+        }
+    }
+
     // ---------------------------------------------------------------- recording
 
     private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
+        if (id.startsWith(`${this.namespace}.`)) {
+            // the own namespace is never recorded; only the replay states are subscribed
+            if (state && !state.ack) {
+                void this.onReplayCommand(id.substring(this.namespace.length + 1), state);
+            }
+            return;
+        }
         const storage = this.storage;
         const dp = this.dps.get(id);
         if (!storage || !dp || !state) {
@@ -888,7 +1171,11 @@ class RecorderAdapter extends utils.Adapter {
             if (this.flushTimer) {
                 this.clearInterval(this.flushTimer);
             }
+            if (this.replayTimer) {
+                this.clearInterval(this.replayTimer);
+            }
             this.flushTimer = null;
+            this.replayTimer = null;
             this.keyframeTimer = null;
             this.retentionTimer = null;
             this.midnightTimer = null;

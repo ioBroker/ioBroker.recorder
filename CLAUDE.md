@@ -17,7 +17,7 @@ The implementation plan (German) is the Claude Doc "ioBroker.recorder: Umsetzung
 | M1 | scaffold, SQLite storage, batched writing, keyframes, retention | done |
 | M2 | selection engine (type detector, enums, roles, include/exclude, custom exclusions) | done |
 | M3 | frequency filter, classification by rate, 5 min aggregation, `getHistory` | done (7 day acceptance run and Echarts test open) |
-| M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | open |
+| M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | done |
 | M5 | presence simulation | open |
 | M6 | anomaly detection | open |
 
@@ -27,7 +27,11 @@ code is the compiled `build/` (`package.json` `main` is `build/main.js`). `build
 ## Commands
 
 ```bash
-npm run build                             # tsc -p tsconfig.build.json  -> build/
+npm run build                             # backend (tsc -> build/) and the admin tab (tasks.ts)
+npm run build-backend                     # tsc -p tsconfig.build.json  -> build/
+npm run build-tab                         # tsx tasks.ts: src-tab (vite) -> admin/tab.html + admin/assets/
+npm run check-tab                         # type check of src-tab
+npm run lint-tab                          # eslint of src-tab (own config, reactConfig)
 npm run check                             # type check only
 npm run lint                              # eslint (@iobroker/eslint-config)
 npx eslint -c eslint.config.mjs --fix src # autofix + prettier formatting
@@ -39,8 +43,11 @@ npm run bench -- --rate 10000 --seconds 60 --dps 2000   # load test of the stora
 npm run translate                         # admin/i18n from en.json
 ```
 
-There is deliberately **no `prepare` script**; `common.nogit` is `true`. There is no `tasks.ts`
-yet because the admin is pure JsonConfig; it is added with the React admin tab in M4.
+There is deliberately **no `prepare` script**; `common.nogit` is `true`. The settings are pure
+JsonConfig; only the tab "Time machine" is React (`src-tab/`, own `package.json` and
+`node_modules`). `tasks.ts` (tsx, `@iobroker/build-tools`) installs src-tab if needed, builds it with
+vite and copies `src-tab/build/*` into `admin/`. `admin/tab.html` and `admin/assets/` are
+gitignored, so `npm run build` must run before `npm pack`.
 
 ## Architecture
 
@@ -52,6 +59,10 @@ yet because the admin is pure JsonConfig; it is added with the React admin tab i
 | `src/lib/aggregator.ts` | 5 minute aggregates (min, max, mean of samples, last) for class "aggregated" |
 | `src/lib/preview.ts` | size estimate and the HTML table of the admin tab "Preview" |
 | `src/lib/filter.ts` | frequency filter: `filterRuleFor` (defaults per role, role rules), `ChangeFilter`, `RateMeter`, `nextRate` |
+| `src/lib/walk.ts` | walk into the past: `readSnapshot`, `readChanges` (replay), `readEventList` (journal), `readTimeline` |
+| `src/lib/walk-types.ts` | request and answer types of `getSnapshot` / `getEvents` / `getTimeline`, also imported by the tab |
+| `src-tab/` | admin tab "Time machine" (React 19, MUI, gui-components, vite): `TimeMachine`, `Timeline`, `RoomTiles`, `Journal` |
+| `tasks.ts` | build of the tab into `admin/` |
 | `src/lib/history.ts` | `getHistory`: options parsed like sql (`parseHistoryRequest`), reading with border values (`readHistory`) |
 | `src/lib/storage.ts` | `Storage`: meta.sqlite + one file per week, upsert of datapoints, sources, batch write, retention |
 | `src/lib/schema.ts` | SQL schemas, versioned with `PRAGMA user_version` |
@@ -117,6 +128,9 @@ loop every 200 detections. **The detector caches results per instance: always us
 | `getEnabledDPs` | - | `{ [id]: { enabled, category, cls, reason } }` of the recorded states |
 | `enableHistory` / `disableHistory` | `{ id, options? }` | sets `common.custom[recorder.0].mode` to `always` / `exclude` |
 | `getHighFrequency` | - | `{ text: html }` for the admin tab "High frequency" |
+| `getSnapshot` | `{ ts?, room?, category?, ids? }` | `{ ts, keyframe, states: [{ id, name, room, category, val, text, lc, from, user, src }], ms }` |
+| `getEvents` | `{ start?, end?, room?, category?, ids?, src?, limit?, newest? }` | `{ events: [{ ts, id, name, room, val, text, ack, from, user, src }], more, ms }` |
+| `getTimeline` | `{ start?, end?, buckets?, room?, category?, ids?, src? }` | `{ start, end, step, counts, first, ms }` |
 
 `getHistory` follows history, sql and influxdb and uses `@iobroker/aggregate` (`sendResponse`) for
 the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total`, `percentile`,
@@ -131,6 +145,26 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
   aggregation and `true`/`false` for `none`/`onchange`.
 - `from: true` also returns `user`; `q` is not stored.
 - A request for the target of a recorded alias is answered from the alias.
+
+### Walk into the past
+
+- **Snapshot at T**: the newest keyframe at or before T (week files newest first), then the events in
+  (keyframe, T] on top, then for class "aggregated" the `last` of the newest 5 minute interval that
+  ended in (keyframe, T]. The buffer and the running intervals count as well. `lc` is the time of the
+  event, `null` for a value from the keyframe. Measured: 15 ms median, 29 ms max for 1,000 datapoints
+  with 10,000 changes after the keyframe (target < 100 ms).
+- **Filters**: `room` / `category` / `ids` select datapoints (`dp.room` may hold several rooms
+  separated by commas), `src` (`user` / `script` / `adapter` / `system`) selects sources. Lists are
+  inlined into the SQL as integers.
+- **Replay** (`replay.active` / `replay.time` / `replay.speed`, only commands with `ack: false`): a jump
+  writes the snapshot into the mirrors; playing advances `speed` seconds per real second and writes
+  only the changes (`readChanges`); it stops at the present. The mirrors
+  `mirror.<oid, . and forbidden chars as _>` exist only with `mirrorStates`; `syncMirrors` creates
+  and deletes them after every selection run.
+- **Tab**: one snapshot per jump (debounced to 150 ms while dragging, stale answers are dropped), the
+  journal of 6 h before the cursor, playback fetches only the changes since the last step and loads
+  a full snapshot every 20 steps (5 minute values) or when there were too many changes. The status
+  line shows the time of a jump until it is drawn (acceptance < 300 ms).
 
 ### Recording path
 

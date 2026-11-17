@@ -50,6 +50,8 @@ declare global {
             burstLimit: number;
             /** Overrides of the frequency filter per role (pattern with `*`) */
             roleRules: RecorderRoleRule[];
+            /** Create `mirror.*`: a read-only copy of every recorded state, written by the replay */
+            mirrorStates: boolean;
         }
     }
 }

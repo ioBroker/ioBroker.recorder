@@ -51,6 +51,7 @@ tests.integration(path.join(__dirname, '..'), {
                         excludePatterns: [],
                         flushInterval: 1,
                         retentionDays: 7,
+                        mirrorStates: true,
                         // every change of "value", a dead band of 0.2 without delay for the temperature
                         roleRules: [
                             { role: 'value', deadband: 0, relative: false, minInterval: 0, heartbeat: 0 },
@@ -67,9 +68,11 @@ tests.integration(path.join(__dirname, '..'), {
                 const before = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.ts >= startedAt);
                 const baseline = before?.val || 0;
 
+                const setAt = [];
                 for (const val of [1, 2, 2, 3]) {
                     // the second 2 is an update without a change and must not be recorded
                     await harness.states.setStateAsync(TEST_ID, { val, ack: true });
+                    setAt.push(Date.now());
                     await wait(50);
                 }
                 for (const val of [20.1, 20.3, 20.4, 21]) {
@@ -155,6 +158,43 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.deepStrictEqual(features.supportedFeatures, []);
                 const enabled = await sendTo('getEnabledDPs', null);
                 assert.strictEqual(enabled[TEST_ID]?.enabled, true);
+
+                // walk into the past
+                const now = await sendTo('getSnapshot', {});
+                assert.ok(!now.error, now.error);
+                assert.strictEqual(now.states.find(s => s.id === TEST_ID)?.val, 3);
+                assert.strictEqual(now.states.find(s => s.id === TEMP_ID)?.val, 21);
+                const past = await sendTo('getSnapshot', { ts: setAt[0] + 20 });
+                assert.strictEqual(past.states.find(s => s.id === TEST_ID)?.val, 1, 'the value after the first change');
+                const atKeyframe = await sendTo('getSnapshot', { ts: setAt[0] - 20 });
+                assert.strictEqual(atKeyframe.states.find(s => s.id === TEST_ID)?.val, 0, 'the value of the keyframe');
+
+                const journal = await sendTo('getEvents', { start: startedAt, ids: TEST_ID });
+                assert.ok(!journal.error, journal.error);
+                assert.deepStrictEqual(
+                    journal.events.map(e => e.val),
+                    [1, 2, 3],
+                );
+                assert.strictEqual(journal.events[0].name, 'Recorder test');
+                const timeline = await sendTo('getTimeline', { start: startedAt, buckets: 10 });
+                assert.ok(!timeline.error, timeline.error);
+                assert.ok(timeline.counts.reduce((a, b) => a + b, 0) >= 5, JSON.stringify(timeline));
+
+                // replay into the mirror states
+                const mirror = 'recorder.0.mirror.0_userdata_0_recorderTest';
+                assert.ok(await harness.objects.getObjectAsync(mirror), 'the mirror state must exist');
+                await harness.states.setStateAsync('recorder.0.replay.time', { val: setAt[0] + 20, ack: false });
+                const jumped = await waitForState(harness, mirror, s => s?.val === 1);
+                assert.strictEqual(jumped?.val, 1, 'a jump writes the snapshot into the mirrors');
+                await harness.states.setStateAsync('recorder.0.replay.speed', { val: 600, ack: false });
+                await harness.states.setStateAsync('recorder.0.replay.active', { val: true, ack: false });
+                const ended = await waitForState(
+                    harness,
+                    'recorder.0.replay.active',
+                    s => s?.ack && s.val === false && s.ts > setAt[3],
+                );
+                assert.strictEqual(ended?.val, false, 'the replay stops at the present');
+                assert.strictEqual((await harness.states.getStateAsync(mirror))?.val, 3, 'the replay wrote the changes');
             });
         });
     },

@@ -55,5 +55,8 @@
     "Filter": "过滤器",
     "Automatic (frequency filter)": "自动（频率过滤器）",
     "Every change": "每次变化",
-    "Every change: no dead band, no throttling, never aggregated automatically": "每次变化：无死区、不限流、从不自动聚合"
+    "Every change: no dead band, no throttling, never aggregated automatically": "每次变化：无死区、不限流、从不自动聚合",
+    "Replay": "回放",
+    "Mirror states for vis": "用于 vis 的镜像状态",
+    "Creates a read-only copy of every recorded state under mirror.*. While replay.active is on, the replay writes the past values there: a vis view on the mirrors becomes a time machine.": "在 mirror.* 下为每个记录的状态创建只读副本。当 replay.active 开启时，回放会把过去的值写入其中：基于镜像的 vis 视图就成了时光机。"
 }

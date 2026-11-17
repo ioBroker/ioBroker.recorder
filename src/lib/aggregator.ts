@@ -94,6 +94,15 @@ export class Aggregator {
         return rows;
     }
 
+    /** All intervals that are not written yet, also the running ones */
+    public pendingAll(): AggregateRow[] {
+        const rows = [...this.closed];
+        for (const [dp, bucket] of this.buckets) {
+            rows.push(Aggregator.toRow(dp, bucket));
+        }
+        return rows;
+    }
+
     /** Forgets a datapoint that is no longer recorded */
     public remove(dp: number): void {
         this.buckets.delete(dp);

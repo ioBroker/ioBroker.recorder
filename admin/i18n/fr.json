@@ -55,5 +55,8 @@
     "Filter": "Filtre",
     "Automatic (frequency filter)": "Automatique (filtre de fréquence)",
     "Every change": "Chaque changement",
-    "Every change: no dead band, no throttling, never aggregated automatically": "Chaque changement : pas de zone morte, pas de limitation, jamais agrégé automatiquement"
+    "Every change: no dead band, no throttling, never aggregated automatically": "Chaque changement : pas de zone morte, pas de limitation, jamais agrégé automatiquement",
+    "Replay": "Relecture",
+    "Mirror states for vis": "États miroirs pour vis",
+    "Creates a read-only copy of every recorded state under mirror.*. While replay.active is on, the replay writes the past values there: a vis view on the mirrors becomes a time machine.": "Crée sous mirror.* une copie en lecture seule de chaque état enregistré. Tant que replay.active est activé, la relecture y écrit les valeurs passées : une vue vis sur les miroirs devient une machine à remonter le temps."
 }

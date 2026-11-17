@@ -55,5 +55,8 @@
     "Filter": "Фільтр",
     "Automatic (frequency filter)": "Автоматично (частотний фільтр)",
     "Every change": "Кожна зміна",
-    "Every change: no dead band, no throttling, never aggregated automatically": "Кожна зміна: без мертвої зони, без обмеження, ніколи не агрегується автоматично"
+    "Every change: no dead band, no throttling, never aggregated automatically": "Кожна зміна: без мертвої зони, без обмеження, ніколи не агрегується автоматично",
+    "Replay": "Відтворення",
+    "Mirror states for vis": "Дзеркальні стани для vis",
+    "Creates a read-only copy of every recorded state under mirror.*. While replay.active is on, the replay writes the past values there: a vis view on the mirrors becomes a time machine.": "Створює в mirror.* копію кожного записаного стану лише для читання. Поки replay.active увімкнено, відтворення записує туди минулі значення: вигляд vis на дзеркала стає машиною часу."
 }

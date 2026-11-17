@@ -17,6 +17,7 @@ import {
     type DpDefinition,
     type DpInfo,
     type Keyframe,
+    type KeyframeRow,
     type RateInfo,
     type RecordedEvent,
     type SourceKind,
@@ -60,6 +61,49 @@ export interface RetentionResult {
     deletedFiles: string[];
     /** Rows deleted from the oldest remaining week file */
     trimmedRows: number;
+}
+
+/** Filters of the reading methods over all datapoints */
+export interface EventFilter {
+    /** Only these `dp.id`; `undefined`: all */
+    dps?: number[];
+    /** Only these `src.id`; `undefined`: all */
+    srcs?: number[];
+}
+
+/** A source of changes as stored in `src` */
+export interface SourceInfo {
+    from: string | null;
+    user: string | null;
+    kind: SourceKind;
+}
+
+/** `AND dp IN (...) AND src IN (...)`; the IDs are integers from the database, safe to inline */
+function filterSql(filter: EventFilter | undefined): string {
+    let sql = '';
+    if (filter?.dps) {
+        sql += ` AND dp IN (${filter.dps.map(id => Math.trunc(id)).join(',')})`;
+    }
+    if (filter?.srcs) {
+        sql += ` AND src IN (${filter.srcs.map(id => Math.trunc(id)).join(',')})`;
+    }
+    return sql;
+}
+
+/** True if a filter excludes everything */
+function filtersAll(filter: EventFilter | undefined): boolean {
+    return filter?.dps?.length === 0 || filter?.srcs?.length === 0;
+}
+
+function rowToEvent(row: Row): RecordedEvent {
+    return {
+        ts: toNumber(row.ts) ?? 0,
+        dp: toNumber(row.dp) ?? 0,
+        val: toNumber(row.val),
+        sval: toText(row.sval),
+        ack: toNumber(row.ack) === 1,
+        src: toNumber(row.src),
+    };
 }
 
 /** Columns read from the event tables */
@@ -122,7 +166,7 @@ export class Storage {
     private readonly dpsByOid = new Map<string, DpInfo>();
     private readonly dpsById = new Map<number, DpInfo>();
     private readonly sources = new Map<string, number>();
-    private readonly sourcesById = new Map<number, { from: string | null; user: string | null }>();
+    private readonly sourcesById = new Map<number, SourceInfo>();
 
     public constructor(public readonly dataDir: string) {}
 
@@ -153,12 +197,12 @@ export class Storage {
             this.dpsByOid.set(dp.oid, dp);
             this.dpsById.set(dp.id, dp);
         }
-        for (const row of this.meta.prepare('SELECT id, fromId, userId FROM src').all()) {
+        for (const row of this.meta.prepare('SELECT id, fromId, userId, kind FROM src').all()) {
             const from = toText(row.fromId);
             const user = toText(row.userId);
             const id = toNumber(row.id) ?? 0;
             this.sources.set(`${from ?? ''}\n${user ?? ''}`, id);
-            this.sourcesById.set(id, { from, user });
+            this.sourcesById.set(id, { from, user, kind: toNumber(row.kind) ?? 3 });
         }
     }
 
@@ -276,7 +320,7 @@ export class Storage {
             id = Number(this.statements.insertSrc.run(from ?? null, user ?? null, kind).lastInsertRowid);
         }
         this.sources.set(key, id);
-        this.sourcesById.set(id, { from: from ?? null, user: user ?? null });
+        this.sourcesById.set(id, { from: from ?? null, user: user ?? null, kind });
         return id;
     }
 
@@ -573,9 +617,124 @@ export class Storage {
         });
     }
 
-    /** `state.from` and `state.user` of a source ID */
-    public getSource(id: number): { from: string | null; user: string | null } | undefined {
+    /** `state.from`, `state.user` and the kind of a source ID */
+    public getSource(id: number): SourceInfo | undefined {
         return this.sourcesById.get(id);
+    }
+
+    /** The IDs of all sources of the given kinds */
+    public sourceIdsOfKinds(kinds: Set<SourceKind>): number[] {
+        const ids: number[] = [];
+        for (const [id, source] of this.sourcesById) {
+            if (kinds.has(source.kind)) {
+                ids.push(id);
+            }
+        }
+        return ids;
+    }
+
+    // ---------------------------------------------------------------- reading over all datapoints
+
+    /** The time of the newest keyframe at or before `ts`, `null` if there is none */
+    public keyframeAtOrBefore(ts: number): number | null {
+        let found: number | null = null;
+        this.scanWeeks(0, ts + 1, true, db => {
+            found = toNumber(db.prepare('SELECT MAX(ts) AS ts FROM keyframe WHERE ts <= ?').get(ts)?.ts);
+            return found === null;
+        });
+        return found;
+    }
+
+    /** The rows of the keyframe at `ts` */
+    public readKeyframe(ts: number): KeyframeRow[] {
+        let rows: KeyframeRow[] = [];
+        this.scanWeeks(ts, ts + 1, false, db => {
+            rows = db
+                .prepare('SELECT dp, val, sval FROM keyframe WHERE ts = ?')
+                .all(ts)
+                .map(row => ({ dp: toNumber(row.dp) ?? 0, val: toNumber(row.val), sval: toText(row.sval) }));
+            return false;
+        });
+        return rows;
+    }
+
+    /**
+     * The events of all (or the filtered) datapoints in `[from, to)`, sorted by time. With `limit`
+     * only the oldest ones, or with `newest` the newest ones.
+     */
+    public readAllEvents(
+        from: number,
+        to: number,
+        filter?: EventFilter,
+        limit?: number,
+        newest = false,
+    ): RecordedEvent[] {
+        if (filtersAll(filter)) {
+            return [];
+        }
+        const rows: Row[] = [];
+        const order = newest ? 'DESC' : 'ASC';
+        const sql = `SELECT ts, dp, val, sval, ack, src FROM ev WHERE ts >= ? AND ts < ?${filterSql(filter)} ORDER BY ts ${order}, rowid ${order}`;
+        this.scanWeeks(from, to, newest, db => {
+            const found = limit
+                ? db.prepare(`${sql} LIMIT ?`).all(from, to, limit - rows.length)
+                : db.prepare(sql).all(from, to);
+            rows.push(...found);
+            return !limit || rows.length < limit;
+        });
+        const events = rows.map(rowToEvent);
+        return newest ? events.reverse() : events;
+    }
+
+    /** Per datapoint the newest 5 minute aggregate with a start in `[from, to)` */
+    public readLatestAggregates(from: number, to: number, filter?: EventFilter): AggregateRow[] {
+        const latest = new Map<number, AggregateRow>();
+        if (filtersAll(filter)) {
+            return [];
+        }
+        const sql = `SELECT ${COLUMNS.agg5} FROM agg5 WHERE ts >= ? AND ts < ?${filterSql({ dps: filter?.dps })} ORDER BY ts`;
+        this.scanWeeks(from, to, false, db => {
+            for (const row of db.prepare(sql).all(from, to)) {
+                const agg = rowToAggregate(row);
+                latest.set(agg.dp, agg);
+            }
+            return true;
+        });
+        return [...latest.values()];
+    }
+
+    /** The number of events per interval of `step` ms in `[from, to)` */
+    public countEventsByBucket(from: number, to: number, step: number, filter?: EventFilter): number[] {
+        const counts = new Array<number>(Math.max(0, Math.ceil((to - from) / step))).fill(0);
+        if (filtersAll(filter) || !counts.length) {
+            return counts;
+        }
+        const sql = `SELECT CAST((ts - ?) / ? AS INTEGER) AS b, COUNT(*) AS n FROM ev WHERE ts >= ? AND ts < ?${filterSql(filter)} GROUP BY b`;
+        this.scanWeeks(from, to, false, db => {
+            for (const row of db.prepare(sql).all(from, step, from, to)) {
+                const bucket = toNumber(row.b) ?? -1;
+                if (bucket >= 0 && bucket < counts.length) {
+                    counts[bucket] += toNumber(row.n) ?? 0;
+                }
+            }
+            return true;
+        });
+        return counts;
+    }
+
+    /** The oldest recorded time (keyframe or event), `null` if nothing is recorded */
+    public oldestTs(): number | null {
+        let oldest: number | null = null;
+        this.scanWeeks(0, Infinity, false, db => {
+            for (const table of ['keyframe', 'ev']) {
+                const ts = toNumber(db.prepare(`SELECT MIN(ts) AS ts FROM ${table}`).get()?.ts);
+                if (ts !== null && (oldest === null || ts < oldest)) {
+                    oldest = ts;
+                }
+            }
+            return oldest === null;
+        });
+        return oldest;
     }
 
     /**

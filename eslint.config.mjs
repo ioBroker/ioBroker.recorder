@@ -6,7 +6,7 @@ export default [
         languageOptions: {
             parserOptions: {
                 projectService: {
-                    allowDefaultProject: ['*.mjs'],
+                    allowDefaultProject: ['*.mjs', 'tasks.ts'],
                 },
                 tsconfigRootDir: import.meta.dirname,
             },
@@ -20,6 +20,7 @@ export default [
             'test/**/*',
             'build/**/*',
             'tasks.js',
+            'src-tab/**/*',
             'tmp/**/*',
             'www/**/*',
             '.**/*',

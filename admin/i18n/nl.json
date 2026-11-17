@@ -55,5 +55,8 @@
     "Filter": "Filter",
     "Automatic (frequency filter)": "Automatisch (frequentiefilter)",
     "Every change": "Elke wijziging",
-    "Every change: no dead band, no throttling, never aggregated automatically": "Elke wijziging: geen dode zone, geen afremming, nooit automatisch geaggregeerd"
+    "Every change: no dead band, no throttling, never aggregated automatically": "Elke wijziging: geen dode zone, geen afremming, nooit automatisch geaggregeerd",
+    "Replay": "Afspelen",
+    "Mirror states for vis": "Spiegeldatapunten voor vis",
+    "Creates a read-only copy of every recorded state under mirror.*. While replay.active is on, the replay writes the past values there: a vis view on the mirrors becomes a time machine.": "Maakt onder mirror.* een alleen-lezen kopie van elk geregistreerd datapunt. Zolang replay.active aan staat, schrijft het afspelen daar de waarden uit het verleden: een vis-weergave op de spiegels wordt een tijdmachine."
 }

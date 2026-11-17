@@ -55,5 +55,8 @@
     "Filter": "Фильтр",
     "Automatic (frequency filter)": "Автоматически (частотный фильтр)",
     "Every change": "Каждое изменение",
-    "Every change: no dead band, no throttling, never aggregated automatically": "Каждое изменение: без мёртвой зоны, без ограничения, никогда не агрегируется автоматически"
+    "Every change: no dead band, no throttling, never aggregated automatically": "Каждое изменение: без мёртвой зоны, без ограничения, никогда не агрегируется автоматически",
+    "Replay": "Воспроизведение",
+    "Mirror states for vis": "Зеркальные состояния для vis",
+    "Creates a read-only copy of every recorded state under mirror.*. While replay.active is on, the replay writes the past values there: a vis view on the mirrors becomes a time machine.": "Создаёт под mirror.* копию каждого записываемого состояния только для чтения. Пока включён replay.active, воспроизведение записывает туда прошлые значения: вид vis на зеркала становится машиной времени."
 }

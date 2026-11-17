@@ -14,8 +14,8 @@ a month) - without configuring every single state - and builds three features on
 
 The model is the recorder of Home Assistant.
 
-> **Status:** early development (milestone 3 of 6: recording with frequency filter). Replay,
-> presence simulation and anomaly detection follow.
+> **Status:** early development (milestone 4 of 6: walk into the past). Presence simulation and
+> anomaly detection follow.
 
 ## Selection of the states
 
@@ -75,6 +75,37 @@ sendTo('recorder.0', 'getHistory', {
 Datapoints that are aggregated to 5 minutes (energy) return one value per interval.
 `enableHistory` / `disableHistory` set "always record" / "never record" for a state.
 
+## Walk into the past
+
+The admin tab **Time machine** shows the state of every room at any moment of the recorded period:
+
+- a timeline with the density of the changes; drag it, click it or use the arrow keys
+- play / pause with 1x, 10x, 60x, 600x or 3600x speed
+- tiles per room with lights, windows, climate, blinds ... and the journal of the changes before the
+  cursor ("07:12 Bath · Light **on** (admin)")
+- filters for room, category and "manual actions only"
+
+The same data is available for scripts, vis and the MCP server:
+
+```js
+// the state of all recorded datapoints yesterday at 20:00 (room/category/ids filter optional)
+sendTo('recorder.0', 'getSnapshot', { ts: '2026-11-16T20:00', room: 'Living room' }, answer =>
+    console.log(answer.states)); // [{ id, name, room, category, val, text, lc, from, src }]
+
+// what was switched by hand in the last 24 hours, with names and rooms
+sendTo('recorder.0', 'getEvents', { start: Date.now() - 86400000, src: 'user' }, answer =>
+    console.log(answer.events)); // [{ ts, id, name, room, val, text, from, user, src }]
+
+// changes per interval, for a density chart
+sendTo('recorder.0', 'getTimeline', { start: Date.now() - 86400000, buckets: 96 }, answer =>
+    console.log(answer.counts));
+```
+
+**Replay into states:** `recorder.0.replay.time` (writable: jump), `recorder.0.replay.speed` and
+`recorder.0.replay.active` play the past in the instance itself. With "Mirror states for the replay"
+enabled, every recorded state gets a read-only copy `recorder.0.mirror.<id with _>` that shows the
+replayed value, so a vis project can show the past without touching the real devices.
+
 ## How it differs from history, sql and influxdb
 
 - The states are selected automatically by their meaning (type detector, enums, roles) instead of
@@ -110,6 +141,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 * (bluefox) 5 minute aggregation for high-frequency values (energy)
 * (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like history, sql and influxdb
 * (bluefox) Frequency filter (dead band, minimum interval, heartbeat, throttling) and classification of high-frequency states by their measured rate
+* (bluefox) Walk into the past: `getSnapshot`, `getEvents`, `getTimeline`, replay with mirror states and the admin tab "Time machine"
 
 ## License
 The MIT License (MIT)

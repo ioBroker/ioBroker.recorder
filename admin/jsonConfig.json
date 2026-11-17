@@ -325,6 +325,28 @@
                     "md": 6,
                     "lg": 4,
                     "xl": 4
+                },
+                "_replayHeader": {
+                    "type": "header",
+                    "text": "Replay",
+                    "size": 4,
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "mirrorStates": {
+                    "type": "checkbox",
+                    "label": "Mirror states for vis",
+                    "help": "Creates a read-only copy of every recorded state under mirror.*. While replay.active is on, the replay writes the past values there: a vis view on the mirrors becomes a time machine.",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 8,
+                    "xl": 8
                 }
             }
         },
