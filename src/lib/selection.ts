@@ -161,7 +161,7 @@ function isOwnOrSystem(id: string, ownNamespace: string): boolean {
 }
 
 /** The ID an alias reads from */
-function aliasTarget(obj: ioBroker.StateObject): string | null {
+export function aliasTarget(obj: ioBroker.StateObject): string | null {
     const alias = (obj.common as { alias?: { id?: string | { read?: string } } }).alias;
     if (!alias?.id) {
         return null;

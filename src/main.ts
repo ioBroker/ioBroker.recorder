@@ -4,11 +4,14 @@
  * The MIT License (MIT)
  */
 import * as utils from '@iobroker/adapter-core';
+import { sendResponse, type IobDataEntry } from '@iobroker/aggregate';
 
 import { Aggregator } from './lib/aggregator';
 import { categoryModes } from './lib/categories';
+import { parseHistoryRequest, readHistory } from './lib/history';
 import { estimateSize, renderPreview, summaryText } from './lib/preview';
 import {
+    aliasTarget,
     computeSelection,
     DeviceDetection,
     type Candidate,
@@ -104,6 +107,8 @@ class RecorderAdapter extends utils.Adapter {
     private readonly dps = new Map<string, DpInfo>();
     /** Why each datapoint is recorded */
     private readonly reasons = new Map<string, string>();
+    /** Recorded alias by the ID it reads from: `getHistory` of the target answers from the alias */
+    private readonly recordedAliases = new Map<string, string>();
     /** Last stored value per `dp.id` */
     private readonly cache = new Map<number, CachedValue>();
     private readonly aggregator = new Aggregator();
@@ -272,6 +277,7 @@ class RecorderAdapter extends utils.Adapter {
         const now = Date.now();
         const activeIds = new Set<number>();
         const added: string[] = [];
+        this.recordedAliases.clear();
         storage.batchMeta(() => {
             for (const [id, selected] of result.selected) {
                 const dp = storage.upsertDp(selected, now);
@@ -281,6 +287,11 @@ class RecorderAdapter extends utils.Adapter {
                 }
                 this.dps.set(id, dp);
                 this.reasons.set(id, selected.reason);
+                const obj = this.objects[id];
+                const target = obj?.type === 'state' ? aliasTarget(obj) : null;
+                if (target) {
+                    this.recordedAliases.set(target, id);
+                }
             }
         });
         const removed = [...this.dps.keys()].filter(id => !result.selected.has(id));
@@ -354,8 +365,104 @@ class RecorderAdapter extends utils.Adapter {
                 void this.updateSelection().then(() => respond({ result: `${this.dps.size} states` }));
                 break;
 
+            // the commands of history, sql and influxdb
+            case 'getHistory':
+                this.handleGetHistory(obj);
+                break;
+
+            case 'features':
+                // no update, delete or storeState: the recorder keeps what happened
+                respond({ supportedFeatures: [] });
+                break;
+
+            case 'getEnabledDPs':
+                respond(this.getEnabledDps());
+                break;
+
+            case 'enableHistory':
+                void this.setCustomMode(obj, 'always').then(respond);
+                break;
+
+            case 'disableHistory':
+                void this.setCustomMode(obj, 'exclude').then(respond);
+                break;
+
             default:
                 respond({ error: `Unknown command: ${obj.command}` });
+        }
+    }
+
+    /** `getHistory` with the options of history, sql and influxdb, aggregated by `@iobroker/aggregate` */
+    private handleGetHistory(msg: ioBroker.Message): void {
+        const startTime = Date.now();
+        const request = parseHistoryRequest(msg.message, startTime);
+        if ('error' in request) {
+            if (msg.callback) {
+                this.sendTo(msg.from, msg.command, { result: [], step: null, error: request.error }, msg.callback);
+            }
+            return;
+        }
+        const { id, options } = request;
+        const storage = this.storage;
+        if (!storage) {
+            sendResponse(this, msg, id, options, 'The instance is not ready yet', startTime);
+            return;
+        }
+        // also datapoints that are not recorded anymore, as long as their data is kept
+        const recordedId = this.dps.has(id) ? id : this.recordedAliases.get(id) || id;
+        const dp = this.dps.get(recordedId) || storage.getDp(recordedId);
+        let data: IobDataEntry[] = [];
+        if (dp) {
+            try {
+                data = readHistory(storage, dp, options, {
+                    events: this.buffer,
+                    aggregates: this.aggregator.pending(dp.id),
+                });
+            } catch (e) {
+                sendResponse(this, msg, id, options, `Cannot read the history of ${id}: ${String(e)}`, startTime);
+                return;
+            }
+        }
+        sendResponse(this, msg, id, options, data, startTime);
+    }
+
+    /** Answer of `getEnabledDPs`: the recorded datapoints, like the enabled ones of history */
+    private getEnabledDps(): Record<string, { enabled: true; category: string | null; cls: string; reason: string }> {
+        const result: Record<string, { enabled: true; category: string | null; cls: string; reason: string }> = {};
+        for (const [id, dp] of this.dps) {
+            result[id] = {
+                enabled: true,
+                category: dp.category,
+                cls: CLASS_NAMES[dp.cls] || 'discrete',
+                reason: this.reasons.get(id) || '',
+            };
+        }
+        return result;
+    }
+
+    /**
+     * `enableHistory` and `disableHistory`: as the states are selected automatically, "disable"
+     * must exclude the state explicitly. The selection follows within `RESELECT_DELAY`.
+     */
+    private async setCustomMode(
+        msg: ioBroker.Message,
+        mode: 'always' | 'exclude',
+    ): Promise<{ success: true } | { error: string }> {
+        const message = msg.message as { id?: unknown; options?: unknown } | null;
+        const id = message?.id;
+        if (typeof id !== 'string' || !id) {
+            return { error: 'Invalid call' };
+        }
+        const options =
+            mode === 'always' && message?.options && typeof message.options === 'object' ? message.options : {};
+        try {
+            await this.extendForeignObjectAsync(id, {
+                common: { custom: { [this.namespace]: { ...options, enabled: true, mode } } },
+            });
+            return { success: true };
+        } catch (e) {
+            this.log.error(`${msg.command} ${id}: ${String(e)}`);
+            return { error: String(e) };
         }
     }
 

@@ -35,6 +35,21 @@ values. Motion and presence are **off** by default for privacy; energy is aggreg
 The tab "Preview" in the instance settings shows which states would be recorded, with the reason
 and a size estimate, before the settings are saved.
 
+## Reading the data
+
+`getHistory` works like with history, sql and influxdb (same options, same aggregation by
+`@iobroker/aggregate`), so charts and scripts can use the recorder as a source:
+
+```js
+sendTo('recorder.0', 'getHistory', {
+    id: 'hm-rpc.0.ABC.1.LEVEL',
+    options: { start: Date.now() - 86400000, aggregate: 'none', from: true },
+}, result => console.log(result.result));
+```
+
+Datapoints that are aggregated to 5 minutes (energy) return one value per interval.
+`enableHistory` / `disableHistory` set "always record" / "never record" for a state.
+
 ## How it differs from history, sql and influxdb
 
 - The states are selected automatically by their meaning (type detector, enums, roles) instead of
@@ -68,6 +83,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 * (bluefox) Initial version: storage layer, batched writing, keyframes, retention
 * (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
 * (bluefox) 5 minute aggregation for high-frequency values (energy)
+* (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like history, sql and influxdb
 
 ## License
 The MIT License (MIT)

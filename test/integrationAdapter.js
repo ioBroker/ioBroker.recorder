@@ -75,6 +75,36 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.strictEqual(typeof preview.text, 'string');
                 assert.ok(preview.text.includes('<table'), 'the preview is an HTML table');
                 assert.ok(!preview.text.includes(TEST_ID), 'without the include rule the state is not selected');
+
+                // the commands of history, sql and influxdb
+                const sendTo = (command, message) =>
+                    new Promise(resolve => harness.sendTo('recorder.0', command, message, resolve));
+                const history = await sendTo('getHistory', {
+                    id: TEST_ID,
+                    options: { start: startedAt, aggregate: 'none', from: true, ack: true, removeBorderValues: true },
+                });
+                assert.ok(!history.error, history.error);
+                assert.deepStrictEqual(
+                    history.result.map(e => e.val).slice(-3),
+                    [1, 2, 3],
+                    'getHistory must return the recorded changes',
+                );
+                assert.strictEqual(history.result[history.result.length - 1].ack, true);
+
+                const average = await sendTo('getHistory', {
+                    id: TEST_ID,
+                    options: { start: startedAt, end: Date.now() + 1000, aggregate: 'max', count: 1 },
+                });
+                assert.ok(!average.error, average.error);
+                assert.ok(
+                    average.result.some(e => e.val === 3),
+                    `the aggregation must find the maximum: ${JSON.stringify(average.result)}`,
+                );
+
+                const features = await sendTo('features', null);
+                assert.deepStrictEqual(features.supportedFeatures, []);
+                const enabled = await sendTo('getEnabledDPs', null);
+                assert.strictEqual(enabled[TEST_ID]?.enabled, true);
             });
         });
     },

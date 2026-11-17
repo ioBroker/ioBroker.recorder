@@ -19,6 +19,7 @@ import {
     type Keyframe,
     type RecordedEvent,
     type SourceKind,
+    type StoredRow,
     type ValueType,
 } from './types';
 import { parseWeekFileName, weekFileName, weekKey } from './week';
@@ -60,6 +61,34 @@ export interface RetentionResult {
     trimmedRows: number;
 }
 
+/** Columns read from the event tables */
+const COLUMNS = {
+    ev: 'ts, val, sval, ack, src',
+    agg5: 'ts, dp, min, max, avg, last',
+} as const;
+
+function rowToStored(row: Row): StoredRow {
+    const ack = toNumber(row.ack);
+    return {
+        ts: toNumber(row.ts) ?? 0,
+        val: toNumber(row.val),
+        sval: toText(row.sval),
+        ack: ack === null ? null : ack !== 0,
+        src: toNumber(row.src),
+    };
+}
+
+function rowToAggregate(row: Row): AggregateRow {
+    return {
+        ts: toNumber(row.ts) ?? 0,
+        dp: toNumber(row.dp) ?? 0,
+        min: toNumber(row.min) ?? 0,
+        max: toNumber(row.max) ?? 0,
+        avg: toNumber(row.avg) ?? 0,
+        last: toNumber(row.last) ?? 0,
+    };
+}
+
 function rowToDp(row: Row): DpInfo {
     return {
         id: toNumber(row.id) ?? 0,
@@ -92,6 +121,7 @@ export class Storage {
     private readonly dpsByOid = new Map<string, DpInfo>();
     private readonly dpsById = new Map<number, DpInfo>();
     private readonly sources = new Map<string, number>();
+    private readonly sourcesById = new Map<number, { from: string | null; user: string | null }>();
 
     public constructor(public readonly dataDir: string) {}
 
@@ -123,7 +153,11 @@ export class Storage {
             this.dpsById.set(dp.id, dp);
         }
         for (const row of this.meta.prepare('SELECT id, fromId, userId FROM src').all()) {
-            this.sources.set(`${toText(row.fromId) ?? ''}\n${toText(row.userId) ?? ''}`, toNumber(row.id) ?? 0);
+            const from = toText(row.fromId);
+            const user = toText(row.userId);
+            const id = toNumber(row.id) ?? 0;
+            this.sources.set(`${from ?? ''}\n${user ?? ''}`, id);
+            this.sourcesById.set(id, { from, user });
         }
     }
 
@@ -241,6 +275,7 @@ export class Storage {
             id = Number(this.statements.insertSrc.run(from ?? null, user ?? null, kind).lastInsertRowid);
         }
         this.sources.set(key, id);
+        this.sourcesById.set(id, { from: from ?? null, user: user ?? null });
         return id;
     }
 
@@ -388,6 +423,129 @@ export class Storage {
             }
         });
         return counts;
+    }
+
+    // ---------------------------------------------------------------- reading
+
+    /**
+     * Calls `fn` for the week files that overlap `[from, to)`, oldest or newest first, as long as it
+     * returns `true`.
+     */
+    private scanWeeks(from: number, to: number, newestFirst: boolean, fn: (db: SqliteDatabase) => boolean): void {
+        const files = this.listWeekFiles().filter(f => f.end > from && f.start < to);
+        if (newestFirst) {
+            files.reverse();
+        }
+        for (const file of files) {
+            let more = true;
+            this.withWeekFile(file, db => {
+                more = fn(db);
+            });
+            if (!more) {
+                break;
+            }
+        }
+    }
+
+    /**
+     * Rows of one datapoint in `[from, to)` of `ev` or `agg5`, sorted by time. With `limit` only the
+     * oldest ones, or with `newest` the newest ones.
+     */
+    private readRange(
+        table: 'ev' | 'agg5',
+        dp: number,
+        from: number,
+        to: number,
+        limit: number | undefined,
+        newest: boolean,
+    ): Row[] {
+        const rows: Row[] = [];
+        const order = newest ? 'DESC' : 'ASC';
+        const sql = `SELECT ${COLUMNS[table]} FROM ${table} WHERE dp = ? AND ts >= ? AND ts < ? ORDER BY ts ${order}, rowid ${order}`;
+        this.scanWeeks(from, to, newest, db => {
+            const found = limit
+                ? db.prepare(`${sql} LIMIT ?`).all(dp, from, to, limit - rows.length)
+                : db.prepare(sql).all(dp, from, to);
+            rows.push(...found);
+            return !limit || rows.length < limit;
+        });
+        return newest ? rows.reverse() : rows;
+    }
+
+    /** The first row of `ev` or `agg5` of a datapoint at or after `ts` */
+    private readFirstFrom(table: 'ev' | 'agg5', dp: number, ts: number): Row | null {
+        let result: Row | null = null;
+        const sql = `SELECT ${COLUMNS[table]} FROM ${table} WHERE dp = ? AND ts >= ? ORDER BY ts, rowid LIMIT 1`;
+        this.scanWeeks(ts, Infinity, false, db => {
+            result = db.prepare(sql).get(dp, ts) ?? null;
+            return !result;
+        });
+        return result;
+    }
+
+    /** Events of one datapoint in `[from, to)`, sorted by time; see `readRange` for `limit` */
+    public readEvents(dp: number, from: number, to: number, limit?: number, newest = false): StoredRow[] {
+        return this.readRange('ev', dp, from, to, limit, newest).map(rowToStored);
+    }
+
+    /** The first event of a datapoint at or after `ts` */
+    public readEventFrom(dp: number, ts: number): StoredRow | null {
+        const row = this.readFirstFrom('ev', dp, ts);
+        return row ? rowToStored(row) : null;
+    }
+
+    /**
+     * The value of a datapoint before `ts`: its last event, or the hourly keyframe if that is later.
+     * Thanks to the keyframes, a value that did not change for weeks is found in the week of `ts`.
+     */
+    public readValueBefore(dp: number, ts: number): StoredRow | null {
+        let result: StoredRow | null = null;
+        this.scanWeeks(0, ts, true, db => {
+            const event = db
+                .prepare(`SELECT ${COLUMNS.ev} FROM ev WHERE dp = ? AND ts < ? ORDER BY ts DESC, rowid DESC LIMIT 1`)
+                .get(dp, ts);
+            if (event) {
+                result = rowToStored(event);
+            }
+            const keyframeTs = toNumber(db.prepare('SELECT MAX(ts) AS ts FROM keyframe WHERE ts < ?').get(ts)?.ts);
+            if (keyframeTs !== null && (!result || keyframeTs > result.ts)) {
+                const row = db.prepare('SELECT val, sval FROM keyframe WHERE ts = ? AND dp = ?').get(keyframeTs, dp);
+                if (row) {
+                    result = { ts: keyframeTs, val: toNumber(row.val), sval: toText(row.sval), ack: null, src: null };
+                }
+            }
+            // a keyframe holds every datapoint that had a value: older files cannot know more
+            return !result && keyframeTs === null;
+        });
+        return result;
+    }
+
+    /** 5 minute aggregates of one datapoint with a start in `[from, to)`; see `readRange` for `limit` */
+    public readAggregates(dp: number, from: number, to: number, limit?: number, newest = false): AggregateRow[] {
+        return this.readRange('agg5', dp, from, to, limit, newest).map(rowToAggregate);
+    }
+
+    /** The first 5 minute aggregate of a datapoint that starts at or after `ts` */
+    public readAggregateFrom(dp: number, ts: number): AggregateRow | null {
+        const row = this.readFirstFrom('agg5', dp, ts);
+        return row ? rowToAggregate(row) : null;
+    }
+
+    /** The last 5 minute aggregate of a datapoint that starts before `ts` */
+    public readAggregateBefore(dp: number, ts: number): AggregateRow | null {
+        let result: AggregateRow | null = null;
+        const sql = `SELECT ${COLUMNS.agg5} FROM agg5 WHERE dp = ? AND ts < ? ORDER BY ts DESC LIMIT 1`;
+        this.scanWeeks(0, ts, true, db => {
+            const row = db.prepare(sql).get(dp, ts);
+            result = row ? rowToAggregate(row) : null;
+            return !result;
+        });
+        return result;
+    }
+
+    /** `state.from` and `state.user` of a source ID */
+    public getSource(id: number): { from: string | null; user: string | null } | undefined {
+        return this.sourcesById.get(id);
     }
 
     /**

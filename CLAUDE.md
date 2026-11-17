@@ -16,7 +16,7 @@ The implementation plan (German) is the Claude Doc "ioBroker.recorder: Umsetzung
 | --- | --- | --- |
 | M1 | scaffold, SQLite storage, batched writing, keyframes, retention | done |
 | M2 | selection engine (type detector, enums, roles, include/exclude, custom exclusions) | done |
-| M3 | frequency filter (dead band, min interval, heartbeat), `getHistory` (5 min aggregation is done) | open |
+| M3 | frequency filter (dead band, min interval, heartbeat); done: 5 min aggregation, `getHistory` | open |
 | M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | open |
 | M5 | presence simulation | open |
 | M6 | anomaly detection | open |
@@ -51,6 +51,7 @@ yet because the admin is pure JsonConfig; it is added with the React admin tab i
 | `src/lib/categories.ts` | the 10 categories: detector types, recorded state names, fallback roles, negative roles |
 | `src/lib/aggregator.ts` | 5 minute aggregates (min, max, mean of samples, last) for class "aggregated" |
 | `src/lib/preview.ts` | size estimate and the HTML table of the admin tab "Preview" |
+| `src/lib/history.ts` | `getHistory`: options parsed like sql (`parseHistoryRequest`), reading with border values (`readHistory`) |
 | `src/lib/storage.ts` | `Storage`: meta.sqlite + one file per week, upsert of datapoints, sources, batch write, retention |
 | `src/lib/schema.ts` | SQL schemas, versioned with `PRAGMA user_version` |
 | `src/lib/sqlite.ts` | driver abstraction over `node:sqlite` (suppresses its ExperimentalWarning) |
@@ -107,6 +108,24 @@ loop every 200 detections. **The detector caches results per instance: always us
 | `getSelection` | - | `[{ id, name, room, func, category, devType, cls, reason }]` |
 | `previewSelection` | (unsaved) native config | `{ text: html, count, mbPerMonth }` for `textSendTo` with `container: html` |
 | `recalculate` | - | `{ result }` after a selection run |
+| `getHistory` | `{ id, options }` as for history/sql/influxdb | `{ result, step, sessionId }` via `sendResponse` |
+| `features` | - | `{ supportedFeatures: [] }` (no update/delete/storeState) |
+| `getEnabledDPs` | - | `{ [id]: { enabled, category, cls, reason } }` of the recorded states |
+| `enableHistory` / `disableHistory` | `{ id, options? }` | sets `common.custom[recorder.0].mode` to `always` / `exclude` |
+
+`getHistory` follows history, sql and influxdb and uses `@iobroker/aggregate` (`sendResponse`) for
+the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total`, `percentile`,
+`integral`, `intervalBorders` ...) behave the same. Specifics:
+
+- The value before `start` is the last event or, if later, the hourly keyframe: a value that did
+  not change for weeks is found in the week file of `start`. The value after `end` is the next event.
+- The buffer and the running 5 minute intervals are included (nothing waits for the flush).
+- Class "aggregated" has no single values: each 5 minute interval gives one entry in its middle
+  (`min`/`max` for those methods, both for `minmax`, the mean otherwise).
+- Strings and JSON fall back from a numeric method to `onchange`; booleans are 0/1 for the
+  aggregation and `true`/`false` for `none`/`onchange`.
+- `from: true` also returns `user`; `q` is not stored.
+- A request for the target of a recorded alias is answered from the alias.
 
 ### Recording path
 

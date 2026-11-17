@@ -79,3 +79,12 @@ export interface Keyframe {
     ts: number;
     rows: KeyframeRow[];
 }
+
+/** One stored value as it is read back */
+export interface StoredRow extends StoredValue {
+    ts: number;
+    /** `null` for values from a keyframe */
+    ack: boolean | null;
+    /** ID in the table `src`; `null` for values from a keyframe */
+    src: number | null;
+}

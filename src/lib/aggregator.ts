@@ -84,6 +84,16 @@ export class Aggregator {
         this.closed = rows.concat(this.closed);
     }
 
+    /** The intervals of a datapoint that are not written yet, also the running one */
+    public pending(dp: number): AggregateRow[] {
+        const rows = this.closed.filter(row => row.dp === dp);
+        const bucket = this.buckets.get(dp);
+        if (bucket) {
+            rows.push(Aggregator.toRow(dp, bucket));
+        }
+        return rows;
+    }
+
     /** Forgets a datapoint that is no longer recorded */
     public remove(dp: number): void {
         this.buckets.delete(dp);
