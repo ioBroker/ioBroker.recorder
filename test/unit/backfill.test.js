@@ -36,7 +36,9 @@ function definition(oid, extra) {
     };
 }
 
-describe('anomaly detection: statistics from the recording', () => {
+describe('anomaly detection: statistics from the recording', function () {
+    this.timeout(20_000);
+
     let dir;
     let storage;
     let window;
@@ -81,28 +83,29 @@ describe('anomaly detection: statistics from the recording', () => {
 
         storage.write([], keyframe(at(9, 9, 20)));
         let next = 0;
-        const recordUntil = until => {
-            const events = [];
+        const recordUntil = (until, events) => {
             while (next < changes.length && changes[next][0] < until) {
                 const [time, dp, val] = changes[next++];
                 if (time < down[0] || time >= down[1]) {
                     events.push(ev(time, dp, val));
                 }
             }
-            storage.write(events);
         };
+        // one transaction per hour (slow disks of the CI runners)
         for (let ts = at(9, 10); ts < at(12, 0); ts += HOUR) {
+            const events = [];
             // a change at the full hour is in the keyframe two milliseconds later
-            recordUntil(ts + 2);
+            recordUntil(ts + 2, events);
+            let kf;
             if (ts >= at(11, 2) && ts < at(11, 3)) {
                 // the window was opened while the instance was not running
                 values[window.id] = 1;
-                storage.write([], keyframe(down[1]));
+                kf = keyframe(down[1]);
+            } else if (ts < down[0] || ts >= down[1]) {
+                kf = keyframe(ts + 2);
             }
-            if (ts < down[0] || ts >= down[1]) {
-                storage.write([], keyframe(ts + 2));
-            }
-            recordUntil(ts + HOUR);
+            recordUntil(ts + HOUR, events);
+            storage.write(events, kf);
         }
         // the power meter: one hour of 5 minute aggregates
         const aggs = [];
