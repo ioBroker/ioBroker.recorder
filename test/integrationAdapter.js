@@ -221,6 +221,19 @@ tests.integration(path.join(__dirname, '..'), {
                 const stopped = await waitForState(harness, 'recorder.0.simulation.enabled', s => s?.val === false);
                 assert.strictEqual(stopped?.val, false, 'presence stops the simulation');
                 assert.ok(stopped.ts - homeAt < 1000, `stopped after ${stopped.ts - homeAt} ms`);
+
+                // anomaly detection: still learning, nothing open
+                const info = await sendTo('getAnomalyInfo', null);
+                assert.ok(info.text.includes('<'), JSON.stringify(info));
+                const anomalies = await sendTo('getAnomalies', { open: true });
+                assert.deepStrictEqual(anomalies.anomalies, []);
+                const profile = await sendTo('getProfile', { id: TEMP_ID });
+                assert.strictEqual(profile.learned, false, JSON.stringify(profile));
+                assert.ok(Array.isArray(profile.profile));
+                const ack = await sendTo('ackAnomaly', {});
+                assert.strictEqual(ack.count, 0);
+                const active = await harness.states.getStateAsync('recorder.0.anomaly.active');
+                assert.strictEqual(active?.val, false);
             });
         });
     },

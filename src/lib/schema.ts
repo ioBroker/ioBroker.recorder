@@ -99,8 +99,71 @@ CREATE TABLE IF NOT EXISTS rate (
 );
 `;
 
+/**
+ * Version 3: statistics and anomalies (M6). `stat_hour` and `profile` of version 1 were never
+ * written, so they are created anew with the columns the detection needs.
+ */
+const META_SCHEMA_V3 = `
+DROP TABLE IF EXISTS stat_hour;
+CREATE TABLE stat_hour (
+    ts      INTEGER,                     -- start of the hour
+    dp      INTEGER,
+    how     INTEGER,                     -- local hour of the week 0..167 (Monday 00:00 = 0)
+    min     REAL,
+    max     REAL,
+    avg     REAL,                        -- time-weighted mean
+    last    REAL,
+    onSec   INTEGER,                     -- seconds with a value > 0 (on, open)
+    changes INTEGER,
+    updates INTEGER,                     -- also without a change of value
+    maxGap  INTEGER,                     -- longest time without an update that ended in this hour, ms
+    PRIMARY KEY (dp, ts)
+);
+CREATE INDEX stat_hour_ts ON stat_hour(ts);
+
+DROP TABLE IF EXISTS profile;
+CREATE TABLE profile (                   -- one hour of the week of one datapoint
+    dp         INTEGER,
+    how        INTEGER,
+    n          INTEGER,                  -- hours observed
+    nVal       INTEGER,                  -- hours with a numeric mean
+    mean       REAL,
+    m2         REAL,                     -- Welford: sum of squared deviations
+    pActive    REAL,                     -- share of hours with a change
+    avgChanges REAL,
+    avgUpdates REAL,
+    min        REAL,
+    max        REAL,
+    PRIMARY KEY (dp, how)
+);
+
+CREATE TABLE IF NOT EXISTS baseline (    -- per datapoint, computed daily from stat_hour and the events
+    dp      INTEGER PRIMARY KEY,
+    since   INTEGER,                     -- first hour with statistics
+    hours   INTEGER,                     -- hours with statistics in the profile period
+    updates INTEGER,
+    changes INTEGER,
+    maxGap  INTEGER,                     -- longest time without an update, ms
+    onP95   INTEGER,                     -- 95th percentile of the duration of the active state, ms
+    onCount INTEGER,                     -- active periods measured
+    ts      INTEGER                      -- computed at
+);
+
+CREATE TABLE IF NOT EXISTS anomaly (
+    id    INTEGER PRIMARY KEY,
+    dp    INTEGER,
+    rule  TEXT,
+    ts    INTEGER,                       -- detected
+    endTs INTEGER,                       -- the condition is over
+    ackTs INTEGER,                       -- acknowledged
+    val   REAL,
+    text  TEXT
+);
+CREATE INDEX IF NOT EXISTS anomaly_ts ON anomaly(ts);
+`;
+
 /** Index = version - 1. Each migration runs once, in one transaction with the version update. */
-const META_MIGRATIONS = [META_SCHEMA_V1, META_SCHEMA_V2];
+const META_MIGRATIONS = [META_SCHEMA_V1, META_SCHEMA_V2, META_SCHEMA_V3];
 const EVENTS_MIGRATIONS = [EVENTS_SCHEMA_V1];
 
 function getVersion(db: SqliteDatabase): number {

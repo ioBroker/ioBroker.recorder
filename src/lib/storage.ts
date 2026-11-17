@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import type { AggregateRow } from './aggregator';
 import { initEventsSchema, initMetaSchema } from './schema';
+import { addToProfile, type ProfileCell, type StatHourRow } from './stats';
 import {
     openDatabase,
     toNumber,
@@ -17,6 +18,9 @@ import {
     type DpDefinition,
     type DpInfo,
     type Keyframe,
+    type AnomalyRecord,
+    type AnomalyRule,
+    type Baseline,
     type KeyframeRow,
     type RateInfo,
     type RecordedEvent,
@@ -93,6 +97,22 @@ function filterSql(filter: EventFilter | undefined): string {
 /** True if a filter excludes everything */
 function filtersAll(filter: EventFilter | undefined): boolean {
     return filter?.dps?.length === 0 || filter?.srcs?.length === 0;
+}
+
+const PROFILE_COLUMNS = 'dp, how, n, nVal, mean, m2, pActive, avgChanges, avgUpdates, min, max';
+
+function rowToProfile(row: Row): ProfileCell {
+    return {
+        n: toNumber(row.n) ?? 0,
+        nVal: toNumber(row.nVal) ?? 0,
+        mean: toNumber(row.mean),
+        m2: Math.max(0, toNumber(row.m2) ?? 0),
+        pActive: toNumber(row.pActive) ?? 0,
+        avgChanges: toNumber(row.avgChanges) ?? 0,
+        avgUpdates: toNumber(row.avgUpdates) ?? 0,
+        min: toNumber(row.min),
+        max: toNumber(row.max),
+    };
 }
 
 function rowToEvent(row: Row): RecordedEvent {
@@ -638,6 +658,247 @@ export class Storage {
                 upsert.run(dp, rate.perMin, rate.maxPerMin, rate.high ? 1 : 0, rate.ts);
             }
         });
+    }
+
+    // ---------------------------------------------------------------- statistics and anomalies
+
+    /**
+     * Stores the statistics of one hour and adds them to the weekly profile (Welford), in one
+     * transaction.
+     *
+     * @param rows the statistics of the hour
+     */
+    public writeStatHours(rows: StatHourRow[]): void {
+        const db = this.metaDb;
+        const insert = db.prepare(
+            'INSERT OR REPLACE INTO stat_hour (ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        const read = db.prepare(`SELECT ${PROFILE_COLUMNS} FROM profile WHERE dp = ? AND how = ?`);
+        const upsert = db.prepare(
+            `INSERT OR REPLACE INTO profile (${PROFILE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        transaction(db, () => {
+            for (const row of rows) {
+                insert.run(
+                    row.ts,
+                    row.dp,
+                    row.how,
+                    row.min,
+                    row.max,
+                    row.avg,
+                    row.last,
+                    row.onSec,
+                    row.changes,
+                    row.updates,
+                    row.maxGap,
+                );
+                const old = read.get(row.dp, row.how);
+                const cell = addToProfile(old ? rowToProfile(old) : undefined, row);
+                upsert.run(
+                    row.dp,
+                    row.how,
+                    cell.n,
+                    cell.nVal,
+                    cell.mean,
+                    cell.m2,
+                    cell.pActive,
+                    cell.avgChanges,
+                    cell.avgUpdates,
+                    cell.min,
+                    cell.max,
+                );
+            }
+        });
+    }
+
+    /** The statistics of a datapoint in `[from, to)` */
+    public readStatHours(dp: number, from: number, to: number): StatHourRow[] {
+        return this.metaDb
+            .prepare(
+                'SELECT ts, dp, how, min, max, avg, last, onSec, changes, updates, maxGap FROM stat_hour WHERE dp = ? AND ts >= ? AND ts < ? ORDER BY ts',
+            )
+            .all(dp, from, to)
+            .map(row => ({
+                ts: toNumber(row.ts) ?? 0,
+                dp: toNumber(row.dp) ?? 0,
+                how: toNumber(row.how) ?? 0,
+                min: toNumber(row.min),
+                max: toNumber(row.max),
+                avg: toNumber(row.avg),
+                last: toNumber(row.last),
+                onSec: toNumber(row.onSec) ?? 0,
+                changes: toNumber(row.changes) ?? 0,
+                updates: toNumber(row.updates) ?? 0,
+                maxGap: toNumber(row.maxGap) ?? 0,
+            }));
+    }
+
+    /**
+     * Computes the weekly profiles anew from the statistics since `from`: so the profile forgets
+     * older weeks (seasons).
+     *
+     * @param from start of the profile period
+     */
+    public rebuildProfiles(from: number): void {
+        const db = this.metaDb;
+        transaction(db, () => {
+            db.exec('DELETE FROM profile');
+            db.prepare(
+                `INSERT INTO profile (${PROFILE_COLUMNS})
+                 SELECT dp, how, COUNT(*), COUNT(avg), AVG(avg),
+                        MAX(0, COALESCE(SUM(avg * avg) - SUM(avg) * SUM(avg) / COUNT(avg), 0)),
+                        AVG(changes > 0), AVG(changes), AVG(updates), MIN(min), MAX(max)
+                 FROM stat_hour WHERE ts >= ? GROUP BY dp, how`,
+            ).run(from);
+        });
+    }
+
+    /**
+     * The profile cells by datapoint and hour of the week.
+     *
+     * @param hows only these hours of the week (`null`: all)
+     * @param dp only this datapoint
+     */
+    public readProfile(hows: number[] | null, dp?: number): Map<number, Map<number, ProfileCell>> {
+        const result = new Map<number, Map<number, ProfileCell>>();
+        const where: string[] = [];
+        if (hows) {
+            where.push(`how IN (${hows.map(how => Math.floor(how)).join(',') || '-1'})`);
+        }
+        if (dp !== undefined) {
+            where.push(`dp = ${Math.floor(dp)}`);
+        }
+        const sql = `SELECT ${PROFILE_COLUMNS} FROM profile${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`;
+        for (const row of this.metaDb.prepare(sql).all()) {
+            const id = toNumber(row.dp) ?? 0;
+            let cells = result.get(id);
+            if (!cells) {
+                cells = new Map();
+                result.set(id, cells);
+            }
+            cells.set(toNumber(row.how) ?? 0, rowToProfile(row));
+        }
+        return result;
+    }
+
+    /**
+     * Per datapoint from the statistics since `from`: first hour, hours, updates, changes and the
+     * longest time without an update. `onP95` and `onCount` are 0; the caller adds them.
+     *
+     * @param from start of the profile period
+     */
+    public computeBaselines(from: number): Map<number, Baseline> {
+        const result = new Map<number, Baseline>();
+        const sql =
+            'SELECT dp, MIN(ts) AS since, COUNT(*) AS hours, SUM(updates) AS updates, SUM(changes) AS changes, MAX(maxGap) AS maxGap FROM stat_hour WHERE ts >= ? GROUP BY dp';
+        for (const row of this.metaDb.prepare(sql).all(from)) {
+            const dp = toNumber(row.dp) ?? 0;
+            result.set(dp, {
+                dp,
+                since: toNumber(row.since) ?? from,
+                hours: toNumber(row.hours) ?? 0,
+                updates: toNumber(row.updates) ?? 0,
+                changes: toNumber(row.changes) ?? 0,
+                maxGap: toNumber(row.maxGap) ?? 0,
+                onP95: 0,
+                onCount: 0,
+            });
+        }
+        return result;
+    }
+
+    /** Replaces all baselines */
+    public saveBaselines(baselines: Map<number, Baseline>, now: number = Date.now()): void {
+        const db = this.metaDb;
+        const insert = db.prepare(
+            'INSERT INTO baseline (dp, since, hours, updates, changes, maxGap, onP95, onCount, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        transaction(db, () => {
+            db.exec('DELETE FROM baseline');
+            for (const b of baselines.values()) {
+                insert.run(b.dp, b.since, b.hours, b.updates, b.changes, b.maxGap, b.onP95, b.onCount, now);
+            }
+        });
+    }
+
+    /** The stored baselines and when they were computed */
+    public loadBaselines(): { baselines: Map<number, Baseline>; ts: number | null } {
+        const baselines = new Map<number, Baseline>();
+        let ts: number | null = null;
+        const sql = 'SELECT dp, since, hours, updates, changes, maxGap, onP95, onCount, ts FROM baseline';
+        for (const row of this.metaDb.prepare(sql).all()) {
+            const dp = toNumber(row.dp) ?? 0;
+            baselines.set(dp, {
+                dp,
+                since: toNumber(row.since) ?? 0,
+                hours: toNumber(row.hours) ?? 0,
+                updates: toNumber(row.updates) ?? 0,
+                changes: toNumber(row.changes) ?? 0,
+                maxGap: toNumber(row.maxGap) ?? 0,
+                onP95: toNumber(row.onP95) ?? 0,
+                onCount: toNumber(row.onCount) ?? 0,
+            });
+            const computed = toNumber(row.ts);
+            if (computed !== null && (ts === null || computed > ts)) {
+                ts = computed;
+            }
+        }
+        return { baselines, ts };
+    }
+
+    /** Deletes statistics and anomalies before `cutoff`; the number of deleted rows */
+    public trimStatistics(cutoff: number): number {
+        const db = this.metaDb;
+        let deleted = 0;
+        transaction(db, () => {
+            deleted += Number(db.prepare('DELETE FROM stat_hour WHERE ts < ?').run(cutoff).changes);
+            deleted += Number(db.prepare('DELETE FROM anomaly WHERE ts < ?').run(cutoff).changes);
+        });
+        return deleted;
+    }
+
+    /** Stores a new anomaly; its ID */
+    public insertAnomaly(anomaly: Omit<AnomalyRecord, 'id'>): number {
+        const result = this.metaDb
+            .prepare('INSERT INTO anomaly (dp, rule, ts, endTs, ackTs, val, text) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(anomaly.dp, anomaly.rule, anomaly.ts, anomaly.endTs, anomaly.ackTs, anomaly.val, anomaly.text);
+        return Number(result.lastInsertRowid);
+    }
+
+    /** Sets the end and the acknowledgement of an anomaly */
+    public updateAnomaly(id: number, endTs: number | null, ackTs: number | null): void {
+        this.metaDb.prepare('UPDATE anomaly SET endTs = ?, ackTs = ? WHERE id = ?').run(endTs, ackTs, id);
+    }
+
+    /**
+     * Anomalies detected in `[from, to)`, newest first.
+     *
+     * @param from start
+     * @param to end
+     * @param filter `open`: neither over nor acknowledged, `running`: not over
+     * @param limit at most
+     */
+    public readAnomalies(
+        from: number,
+        to: number,
+        filter: 'all' | 'open' | 'running' = 'all',
+        limit = 1000,
+    ): AnomalyRecord[] {
+        const where = { all: '', open: ' AND endTs IS NULL AND ackTs IS NULL', running: ' AND endTs IS NULL' }[filter];
+        const sql = `SELECT id, dp, rule, ts, endTs, ackTs, val, text FROM anomaly WHERE ts >= ? AND ts < ?${where} ORDER BY ts DESC, id DESC LIMIT ?`;
+        return this.metaDb
+            .prepare(sql)
+            .all(from, to, limit)
+            .map(row => ({
+                id: toNumber(row.id) ?? 0,
+                dp: toNumber(row.dp) ?? 0,
+                rule: (toText(row.rule) ?? 'value') as AnomalyRule,
+                ts: toNumber(row.ts) ?? 0,
+                endTs: toNumber(row.endTs),
+                ackTs: toNumber(row.ackTs),
+                val: toNumber(row.val),
+                text: toText(row.text) ?? '',
+            }));
     }
 
     /** `state.from`, `state.user` and the kind of a source ID */

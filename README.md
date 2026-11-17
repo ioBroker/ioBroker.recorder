@@ -14,8 +14,8 @@ a month) - without configuring every single state - and builds three features on
 
 The model is the recorder of Home Assistant.
 
-> **Status:** early development (milestone 5 of 6: presence simulation). Anomaly detection
-> follows.
+> **Status:** early development. All six milestones of the plan are implemented; the long-term
+> tests on real installations are still running.
 
 ## Selection of the states
 
@@ -134,6 +134,35 @@ which somebody was at home. Enable it in the tab "Presence simulation" of the in
 `recorder.0.simulation.sourceDay`, `nextAction` and `lastAction` show what the simulation does. A
 running simulation continues after a restart of the instance.
 
+## Anomaly detection
+
+For every recorded state the instance learns what is usual in each hour of the week and reports
+what does not fit. The statistics are collected all the time (also with the detection switched off,
+kept for a year); a profile is used after a learning period of 14 days. Enable and tune the rules in
+the tab "Anomalies" of the instance settings.
+
+| Rule | Reports | Default |
+| --- | --- | --- |
+| Unusual value | a temperature, a power ... far from the usual value of this hour of the week (z-score) and outside of everything seen at this time | z > 3 for 30 min |
+| Rare activity | a door, a window, motion or a light in an hour in which this hardly ever happens (the front door at 3 am) | < 2 % of the weeks |
+| Silent sensor | no update for 4 times the usual interval | at least 6 h |
+| Open or on unusually long | windows, doors and lights, compared with the usual duration (95th percentile) | 1.5 times |
+| Window open in the cold | a window or door open while it is cold outside | < 5 °C for 30 min |
+| Racing datapoint | far more changes per hour than usual, or throttled by the burst limit (a defective sensor) | 10 times |
+
+- **Absence**: while the absence state of the tab "Presence simulation" reports absence, every
+  motion and every opening of a door or window is reported.
+- **Outdoor temperature**: the configured state, otherwise a recorded current weather temperature.
+- **Quiet time**: at most one report per state and rule within 12 hours. A condition (cold window,
+  silent sensor ...) ends by itself when it no longer holds.
+- **Output**: `recorder.0.anomaly.active`, `count`, `list` (JSON) and `last`; an ioBroker
+  notification (shown in admin, forwarded by the adapter notification-manager) and optionally a
+  message to an instance such as `telegram.0` or `pushover.0`. `recorder.0.anomaly.ack` acknowledges
+  all open anomalies.
+- **Messages**: `getAnomalies` (`{ start, end, open }`), `getProfile` (`{ id }`: the 168 hours of the
+  week with mean, deviation, minimum, maximum and share of activity), `ackAnomaly` (`{ id }`, without
+  `id`: all).
+
 ## How it differs from history, sql and influxdb
 
 - The states are selected automatically by their meaning (type detector, enums, roles) instead of
@@ -171,6 +200,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 * (bluefox) Frequency filter (dead band, minimum interval, heartbeat, throttling) and classification of high-frequency states by their measured rate
 * (bluefox) Walk into the past: `getSnapshot`, `getEvents`, `getTimeline`, replay with mirror states and the admin tab "Time machine"
 * (bluefox) Presence simulation: replays the switching of lights and blinds of a recorded day at home, started by an absence state or by hand
+* (bluefox) Anomaly detection: hourly statistics and weekly profiles, six rules (unusual value, rare activity, silent sensor, open too long, window open in the cold, racing datapoint), states and ioBroker notifications
 
 ## License
 The MIT License (MIT)

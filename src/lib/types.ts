@@ -100,3 +100,39 @@ export interface RateInfo {
     /** End of the last measurement */
     ts: number;
 }
+
+/** The rules of the anomaly detection */
+export type AnomalyRule = 'value' | 'rare' | 'silent' | 'long' | 'cold' | 'racing';
+
+/** One row of the table `anomaly` */
+export interface AnomalyRecord {
+    id: number;
+    /** `dp.id` */
+    dp: number;
+    rule: AnomalyRule;
+    /** Detected */
+    ts: number;
+    /** The condition is over */
+    endTs: number | null;
+    /** Acknowledged */
+    ackTs: number | null;
+    val: number | null;
+    text: string;
+}
+
+/** Per datapoint: what is usual, from the statistics of the last weeks (table `baseline`) */
+export interface Baseline {
+    dp: number;
+    /** First hour with statistics */
+    since: number;
+    /** Hours with statistics */
+    hours: number;
+    updates: number;
+    changes: number;
+    /** Longest time without an update, ms */
+    maxGap: number;
+    /** 95th percentile of the duration of the active state (on, open), ms; 0 if unknown */
+    onP95: number;
+    /** Active periods measured */
+    onCount: number;
+}

@@ -7,6 +7,7 @@ import * as utils from '@iobroker/adapter-core';
 import { sendResponse, type IobDataEntry } from '@iobroker/aggregate';
 
 import { Aggregator } from './lib/aggregator';
+import { DEFAULT_ANOMALY_SETTINGS, isActive, type AnomalySettings } from './lib/anomaly';
 import { categoryModes } from './lib/categories';
 import {
     ChangeFilter,
@@ -17,6 +18,7 @@ import {
     type DpFilter,
     type RoleRule,
 } from './lib/filter';
+import { AnomalyDetector, type DetectorHost } from './lib/detector';
 import { parseHistoryRequest, readHistory, toTimestamp } from './lib/history';
 import { estimateSize, renderHighFrequency, renderPreview, summaryText } from './lib/preview';
 import {
@@ -40,12 +42,22 @@ import {
 } from './lib/simulator';
 import { classifySource } from './lib/source';
 import { DRIVER_NAME } from './lib/sqlite';
+import { HourStats, hourFloor } from './lib/stats';
 import { Storage } from './lib/storage';
-import { DpClass, type DpInfo, type Keyframe, type RateInfo, type RecordedEvent, type StoredValue } from './lib/types';
+import {
+    DpClass,
+    type AnomalyRecord,
+    type DpInfo,
+    type Keyframe,
+    type RateInfo,
+    type RecordedEvent,
+    type StoredValue,
+} from './lib/types';
 import { encodeValue, sameValue } from './lib/values';
 import { readChanges, readEventList, readSnapshot, readTimeline, type PendingData } from './lib/walk';
 import type { EventsRequest, SnapshotEntry, SnapshotRequest, TimelineRequest } from './lib/walk-types';
 
+const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
@@ -144,6 +156,15 @@ function toInt(value: unknown, min: number, max: number, fallback: number): numb
     return Math.min(max, Math.max(min, n));
 }
 
+/** A number of the settings within `[min, max]` */
+function toFloat(value: unknown, min: number, max: number, fallback: number): number {
+    const n = typeof value === 'string' ? parseFloat(value.replace(',', '.')) : Number(value);
+    if (value === '' || value === null || value === undefined || !Number.isFinite(n)) {
+        return fallback;
+    }
+    return Math.min(max, Math.max(min, n));
+}
+
 function isSelectionObject(id: string, obj: ioBroker.Object | null | undefined): boolean {
     if (!obj || !SELECTION_TYPES.has(obj.type)) {
         return false;
@@ -204,6 +225,12 @@ class RecorderAdapter extends utils.Adapter {
     private triggerAway: boolean | null = null;
     /** From system.config, for the sunset */
     private coordinates: { latitude: number; longitude: number } | undefined;
+    /** Statistics of the running hour, for the profiles of the anomaly detection */
+    private readonly stats = new HourStats(hourFloor(Date.now()));
+    private anomalies: AnomalyDetector | null = null;
+    private anomalyTimer: ioBroker.Interval | null | undefined = null;
+    /** The outdoor temperature found automatically (logged when it changes) */
+    private outdoorId = '';
 
     private flushTimer: ioBroker.Interval | null | undefined = null;
     private keyframeTimer: ioBroker.Timeout | null | undefined = null;
@@ -274,7 +301,9 @@ class RecorderAdapter extends utils.Adapter {
         this.scheduleRetention();
         this.scheduleMidnight();
         await this.initReplay();
+        await this.initTrigger();
         await this.initSimulation();
+        await this.initAnomalies();
         await this.updateInfoStates(true);
     }
 
@@ -409,6 +438,7 @@ class RecorderAdapter extends utils.Adapter {
                 this.aggregator.remove(dp.id);
                 this.filter.remove(dp.id);
                 this.filters.delete(dp.id);
+                this.stats.remove(dp.id);
             }
             this.dps.delete(id);
             this.reasons.delete(id);
@@ -457,6 +487,8 @@ class RecorderAdapter extends utils.Adapter {
                 if (dp && state && !this.cache.has(dp.id)) {
                     const stored = encodeValue(state.val, dp.type);
                     this.cache.set(dp.id, { ...stored, ack: !!state.ack });
+                    const ts = state.ts || Date.now();
+                    this.stats.init(dp.id, stored.val, ts, state.lc || ts);
                     // the value is in the next keyframe: the dead band starts from it
                     this.filter.setBase(dp.id, stored.val, state.ts || Date.now());
                 }
@@ -514,6 +546,38 @@ class RecorderAdapter extends utils.Adapter {
                         this.simulationPlan(storage, obj.message as Partial<ioBroker.AdapterConfig> | null),
                     ),
                 );
+                break;
+
+            // anomaly detection
+            case 'getAnomalies':
+                respond(this.walk(storage => this.getAnomalies(storage, obj.message as Record<string, never> | null)));
+                break;
+
+            case 'getProfile': {
+                const id = (obj.message as { id?: string } | null)?.id;
+                const dp = id ? (this.dps.get(id) ?? this.storage?.getDp(id)) : undefined;
+                respond(
+                    !dp || !this.anomalies
+                        ? { error: `${id} is not recorded` }
+                        : this.walk(() => this.anomalies!.profileOf(dp)),
+                );
+                break;
+            }
+
+            case 'ackAnomaly': {
+                const id = Number((obj.message as { id?: number } | null)?.id);
+                if (!this.anomalies) {
+                    respond({ error: 'The instance is not ready yet' });
+                } else {
+                    void this.anomalies
+                        .ack(Number.isFinite(id) && id > 0 ? id : null)
+                        .then(count => respond({ count }));
+                }
+                break;
+            }
+
+            case 'getAnomalyInfo':
+                respond({ text: this.anomalies?.renderInfo() ?? '' });
                 break;
 
             // the commands of history, sql and influxdb
@@ -967,13 +1031,7 @@ class RecorderAdapter extends utils.Adapter {
             return;
         }
         this.simulation = simulation;
-        this.simTrigger = String(this.config.simTrigger || '').trim();
         if (this.simTrigger) {
-            await this.subscribeForeignStatesAsync(this.simTrigger);
-            const trigger = await this.getForeignStateAsync(this.simTrigger);
-            this.triggerAway = trigger
-                ? triggerMeansAway(trigger.val, toBool(this.config.simTriggerInvert, false))
-                : null;
             if (this.triggerAway) {
                 await simulation.start(`${this.simTrigger} reports absence`, enabled?.val === true);
             } else if (enabled?.val === true) {
@@ -988,10 +1046,24 @@ class RecorderAdapter extends utils.Adapter {
         await this.setStateAsync('simulation.enabled', simulation.running, true);
     }
 
+    /**
+     * The absence state: it starts and stops the simulation; while away, the anomaly detection
+     * reports every motion and opening.
+     */
+    private async initTrigger(): Promise<void> {
+        const trigger = String(this.config.simTrigger || '').trim();
+        if (!trigger || (!this.simulationEnabled() && !toBool(this.config.anomalies, true))) {
+            return;
+        }
+        this.simTrigger = trigger;
+        await this.subscribeForeignStatesAsync(trigger);
+        const state = await this.getForeignStateAsync(trigger);
+        this.triggerAway = state ? triggerMeansAway(state.val, toBool(this.config.simTriggerInvert, false)) : null;
+    }
+
     /** The trigger changed: absence starts the simulation, presence stops it at once */
     private onTrigger(state: ioBroker.State | null | undefined): void {
-        const simulation = this.simulation;
-        if (!state || !simulation) {
+        if (!state) {
             return;
         }
         const away = triggerMeansAway(state.val, toBool(this.config.simTriggerInvert, false));
@@ -999,6 +1071,10 @@ class RecorderAdapter extends utils.Adapter {
             return;
         }
         this.triggerAway = away;
+        const simulation = this.simulation;
+        if (!simulation) {
+            return;
+        }
         // stop() clears its timer synchronously, before the first await
         const change = away
             ? simulation.start(`${this.simTrigger} reports absence`)
@@ -1077,6 +1153,160 @@ class RecorderAdapter extends utils.Adapter {
         };
     }
 
+    // ---------------------------------------------------------------- anomaly detection
+
+    private anomalySettings(): AnomalySettings {
+        const c = this.config;
+        const d = DEFAULT_ANOMALY_SETTINGS;
+        return {
+            value: toBool(c.anoValue, d.value),
+            rare: toBool(c.anoRare, d.rare),
+            silent: toBool(c.anoSilent, d.silent),
+            long: toBool(c.anoLong, d.long),
+            cold: toBool(c.anoCold, d.cold),
+            racing: toBool(c.anoRacing, d.racing),
+            zScore: toFloat(c.anoZ, 1.5, 10, d.zScore),
+            valueMinutes: toInt(c.anoValueMinutes, 0, 1440, d.valueMinutes),
+            rareShare: toFloat(c.anoRareShare, 0, 50, d.rareShare * 100) / 100,
+            silentHours: toFloat(c.anoSilentHours, 1, 168, d.silentHours),
+            silentFactor: d.silentFactor,
+            longFactor: toFloat(c.anoLongFactor, 1, 20, d.longFactor),
+            coldTemp: toFloat(c.anoColdTemp, -30, 30, d.coldTemp),
+            coldMinutes: toInt(c.anoColdMinutes, 0, 1440, d.coldMinutes),
+            racingFactor: toFloat(c.anoRacingFactor, 2, 1000, d.racingFactor),
+            quietHours: toFloat(c.anoQuietHours, 0, 168, d.quietHours),
+            learnDays: toInt(c.anoLearnDays, 7, 56, d.learnDays),
+        };
+    }
+
+    private detectorHost(): DetectorHost {
+        return {
+            log: this.log,
+            storage: () => this.storage,
+            datapoints: () => [...this.dps.values()],
+            value: dp => this.cache.get(dp)?.val ?? null,
+            away: () => (this.simTrigger ? this.triggerAway : null),
+            outdoorTemperature: () => this.outdoorTemperature(),
+            notify: (_anomaly, text) => this.notifyAnomaly(text),
+            report: open => this.reportAnomalies(open),
+            now: () => Date.now(),
+        };
+    }
+
+    /** Statistics and profiles always; the rules only if enabled */
+    private async initAnomalies(): Promise<void> {
+        const detector = new AnomalyDetector(
+            this.detectorHost(),
+            this.stats,
+            this.anomalySettings(),
+            toBool(this.config.anomalies, true),
+            this.lang,
+        );
+        this.anomalies = detector;
+        await this.subscribeStatesAsync('anomaly.ack');
+        await detector.start();
+        this.anomalyTimer = this.setInterval(() => {
+            detector.check().catch(e => this.log.error(`Anomaly detection: ${(e as Error).message}`));
+        }, MINUTE);
+    }
+
+    /** The outdoor temperature: the configured state, or else a recorded weather temperature */
+    private async outdoorTemperature(): Promise<{ val: number; name: string } | null> {
+        const configured = String(this.config.anoOutdoor || '').trim();
+        let oid = configured;
+        if (!oid) {
+            const found = [...this.dps.values()]
+                .filter(
+                    dp =>
+                        dp.category === 'weather' &&
+                        /^value\.temperature/.test(dp.role || '') &&
+                        !/forecast|tomorrow|max|min|feel|dew|day\d/i.test(`${dp.oid} ${dp.role}`),
+                )
+                .sort((a, b) => a.oid.localeCompare(b.oid));
+            oid = found[0]?.oid ?? '';
+            if (oid !== this.outdoorId) {
+                this.outdoorId = oid;
+                if (oid) {
+                    this.log.info(`Anomaly detection: outdoor temperature from ${oid}`);
+                }
+            }
+        }
+        if (!oid) {
+            return null;
+        }
+        const dp = this.dps.get(oid);
+        let val = dp ? (this.cache.get(dp.id)?.val ?? null) : null;
+        if (val === null && configured) {
+            const state = await this.getForeignStateAsync(oid);
+            const n = typeof state?.val === 'number' ? state.val : parseFloat(String(state?.val));
+            val = Number.isFinite(n) ? n : null;
+        }
+        return val === null ? null : { val, name: dp?.name || oid };
+    }
+
+    /** A new anomaly: ioBroker notification (forwarded e.g. by notification-manager) and/or a messenger */
+    private async notifyAnomaly(text: string): Promise<void> {
+        if (toBool(this.config.anoNotify, true)) {
+            await this.registerNotification('recorder', 'anomaly', text);
+        }
+        const instance = String(this.config.anoInstance || '').trim();
+        if (instance) {
+            // telegram, signal, whatsapp: text; pushover: message, title; email: text, subject
+            this.sendTo(instance, 'send', { text, message: text, title: 'ioBroker', subject: 'ioBroker' });
+        }
+    }
+
+    private async reportAnomalies(open: AnomalyRecord[]): Promise<void> {
+        await this.setStateChangedAsync('anomaly.active', open.length > 0, true);
+        await this.setStateChangedAsync('anomaly.count', open.length, true);
+        await this.setStateChangedAsync('anomaly.list', JSON.stringify(this.anomalyEntries(open.slice(0, 50))), true);
+        await this.setStateChangedAsync('anomaly.last', open[0]?.text ?? '', true);
+    }
+
+    /** Anomalies with object ID, name and room */
+    private anomalyEntries(anomalies: AnomalyRecord[]): {
+        id: number;
+        ts: number;
+        endTs: number | null;
+        ackTs: number | null;
+        rule: string;
+        oid: string | null;
+        name: string | null;
+        room: string | null;
+        val: number | null;
+        text: string;
+    }[] {
+        return anomalies.map(a => {
+            const dp = this.storage?.getDpById(a.dp);
+            return {
+                id: a.id,
+                ts: a.ts,
+                endTs: a.endTs,
+                ackTs: a.ackTs,
+                rule: a.rule,
+                oid: dp?.oid ?? null,
+                name: dp?.name ?? null,
+                room: dp?.room ?? null,
+                val: a.val,
+                text: a.text,
+            };
+        });
+    }
+
+    /** `getAnomalies`: the anomalies in a time range, or only the open ones */
+    private getAnomalies(
+        storage: Storage,
+        message: { start?: number | string; end?: number | string; open?: boolean; limit?: number } | null,
+    ): { anomalies: ReturnType<RecorderAdapter['anomalyEntries']> } {
+        const now = Date.now();
+        const start = toTimestamp(message?.start) ?? now - 7 * DAY;
+        const end = toTimestamp(message?.end) ?? now + 1;
+        const limit = toInt(message?.limit, 1, 10_000, 1000);
+        return {
+            anomalies: this.anomalyEntries(storage.readAnomalies(start, end, message?.open ? 'open' : 'all', limit)),
+        };
+    }
+
     // ---------------------------------------------------------------- recording
 
     private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
@@ -1092,6 +1322,11 @@ class RecorderAdapter extends utils.Adapter {
                     void this.onSimulationCommand(state).catch(e =>
                         this.log.error(`Presence simulation: ${(e as Error).message}`),
                     );
+                } else if (own === 'anomaly.ack') {
+                    void this.anomalies
+                        ?.ack(null)
+                        .then(() => this.setStateAsync('anomaly.ack', state.val, true))
+                        .catch(e => this.log.error(`Anomaly detection: ${(e as Error).message}`));
                 } else {
                     void this.onReplayCommand(own, state);
                 }
@@ -1116,6 +1351,13 @@ class RecorderAdapter extends utils.Adapter {
         const changed = !previous || !sameValue(previous, stored);
         if (changed) {
             this.rateMeter.count(dp.id);
+        }
+        this.stats.update(dp.id, ts, stored.val, changed);
+        // the lights of a running presence simulation are no rare activity
+        if (changed && this.anomalies && !(dp.category === 'light' && this.simulation?.running)) {
+            this.anomalies
+                .onChange(dp, stored.val, isActive(previous?.val))
+                .catch(e => this.log.error(`Anomaly detection: ${(e as Error).message}`));
         }
 
         if (dp.cls === DpClass.Aggregated) {
@@ -1300,6 +1542,9 @@ class RecorderAdapter extends utils.Adapter {
     }
 
     private onThrottle(dpId: number): void {
+        this.anomalies
+            ?.onThrottle(dpId, this.filter.burstLimit)
+            .catch(e => this.log.error(`Anomaly detection: ${(e as Error).message}`));
         const now = Date.now();
         const last = this.throttled.get(dpId);
         this.throttled.set(dpId, now);
@@ -1346,8 +1591,27 @@ class RecorderAdapter extends utils.Adapter {
             this.keyframeTimer = null;
             this.flush(this.createKeyframe());
             this.evaluateRates();
+            this.closeStatHour();
             this.scheduleKeyframe();
         }, next - now);
+    }
+
+    /** Every full hour: the statistics of the hour into the profiles */
+    private closeStatHour(): void {
+        const end = Math.round(Date.now() / HOUR) * HOUR;
+        if (end <= this.stats.start) {
+            return;
+        }
+        const rows = this.stats.close(end);
+        if (this.anomalies) {
+            this.anomalies.onHour(rows).catch(e => this.log.error(`Anomaly detection: ${(e as Error).message}`));
+        } else {
+            try {
+                this.storage?.writeStatHours(rows);
+            } catch (e) {
+                this.log.error(`Cannot store the hourly statistics: ${(e as Error).message}`);
+            }
+        }
     }
 
     private runRetention(): void {
@@ -1356,6 +1620,7 @@ class RecorderAdapter extends utils.Adapter {
         }
         try {
             const result = this.storage.retention(this.retentionDays);
+            this.anomalies?.rebuild();
             if (result.deletedFiles.length) {
                 this.log.info(`Retention: deleted ${result.deletedFiles.join(', ')}`);
             }
@@ -1407,6 +1672,10 @@ class RecorderAdapter extends utils.Adapter {
             }
             if (this.replayTimer) {
                 this.clearInterval(this.replayTimer);
+            }
+            if (this.anomalyTimer) {
+                this.clearInterval(this.anomalyTimer);
+                this.anomalyTimer = null;
             }
             // nothing is switched on unload: after the restart the simulation continues
             this.simulation?.dispose();

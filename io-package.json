@@ -133,7 +133,27 @@
     "simSunset": true,
     "simMedia": false,
     "simScripts": false,
-    "simDryRun": false
+    "simDryRun": false,
+    "anomalies": true,
+    "anoValue": true,
+    "anoZ": 3,
+    "anoValueMinutes": 30,
+    "anoRare": true,
+    "anoRareShare": 2,
+    "anoSilent": true,
+    "anoSilentHours": 6,
+    "anoLong": true,
+    "anoLongFactor": 1.5,
+    "anoCold": true,
+    "anoColdTemp": 5,
+    "anoColdMinutes": 30,
+    "anoOutdoor": "",
+    "anoRacing": true,
+    "anoRacingFactor": 10,
+    "anoNotify": true,
+    "anoInstance": "",
+    "anoQuietHours": 12,
+    "anoLearnDays": 14
   },
   "objects": [],
   "instanceObjects": [
@@ -299,6 +319,144 @@
         "def": ""
       },
       "native": {}
+    },
+    {
+      "_id": "anomaly",
+      "type": "channel",
+      "common": {
+        "name": "Anomaly detection"
+      },
+      "native": {}
+    },
+    {
+      "_id": "anomaly.active",
+      "type": "state",
+      "common": {
+        "role": "indicator.alarm",
+        "name": "At least one open anomaly",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    },
+    {
+      "_id": "anomaly.count",
+      "type": "state",
+      "common": {
+        "role": "value",
+        "name": "Number of open anomalies",
+        "type": "number",
+        "read": true,
+        "write": false,
+        "def": 0
+      },
+      "native": {}
+    },
+    {
+      "_id": "anomaly.list",
+      "type": "state",
+      "common": {
+        "role": "json",
+        "name": "Open anomalies (JSON)",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": "[]"
+      },
+      "native": {}
+    },
+    {
+      "_id": "anomaly.last",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": "Newest open anomaly",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "anomaly.ack",
+      "type": "state",
+      "common": {
+        "role": "button",
+        "name": "Acknowledge all open anomalies",
+        "type": "boolean",
+        "read": false,
+        "write": true,
+        "def": false
+      },
+      "native": {}
+    }
+  ],
+  "notifications": [
+    {
+      "scope": "recorder",
+      "name": {
+        "en": "Recorder",
+        "de": "Recorder",
+        "ru": "Рекордер",
+        "pt": "Gravador",
+        "nl": "Recorder",
+        "fr": "Enregistreur",
+        "it": "Registratore",
+        "es": "Grabador",
+        "pl": "Rejestrator",
+        "uk": "Рекордер",
+        "zh-cn": "记录器"
+      },
+      "description": {
+        "en": "Messages of the recorder",
+        "de": "Meldungen des Recorders",
+        "ru": "Сообщения рекордера",
+        "pt": "Mensagens do gravador",
+        "nl": "Meldingen van de recorder",
+        "fr": "Messages de l'enregistreur",
+        "it": "Messaggi del registratore",
+        "es": "Mensajes del grabador",
+        "pl": "Komunikaty rejestratora",
+        "uk": "Повідомлення рекордера",
+        "zh-cn": "记录器消息"
+      },
+      "categories": [
+        {
+          "category": "anomaly",
+          "name": {
+            "en": "Anomaly detected",
+            "de": "Anomalie erkannt",
+            "ru": "Обнаружена аномалия",
+            "pt": "Anomalia detetada",
+            "nl": "Anomalie gedetecteerd",
+            "fr": "Anomalie détectée",
+            "it": "Anomalia rilevata",
+            "es": "Anomalía detectada",
+            "pl": "Wykryto anomalię",
+            "uk": "Виявлено аномалію",
+            "zh-cn": "检测到异常"
+          },
+          "description": {
+            "en": "A value or an activity does not fit the usual weekly pattern: an open window in the cold, a silent sensor, a door at night ...",
+            "de": "Ein Wert oder eine Aktivität passt nicht zum üblichen Wochenmuster: ein offenes Fenster bei Kälte, ein stiller Sensor, eine Tür in der Nacht ...",
+            "ru": "Значение или активность не соответствует обычному недельному шаблону: открытое окно в холод, молчащий датчик, дверь ночью ...",
+            "pt": "Um valor ou uma atividade não corresponde ao padrão semanal habitual: uma janela aberta com frio, um sensor silencioso, uma porta à noite ...",
+            "nl": "Een waarde of activiteit past niet bij het gebruikelijke weekpatroon: een open raam bij kou, een stille sensor, een deur 's nachts ...",
+            "fr": "Une valeur ou une activité ne correspond pas au modèle hebdomadaire habituel : une fenêtre ouverte par temps froid, un capteur muet, une porte la nuit ...",
+            "it": "Un valore o un'attività non corrisponde al consueto schema settimanale: una finestra aperta al freddo, un sensore silenzioso, una porta di notte ...",
+            "es": "Un valor o una actividad no encaja con el patrón semanal habitual: una ventana abierta con frío, un sensor silencioso, una puerta de noche ...",
+            "pl": "Wartość lub aktywność nie pasuje do zwykłego tygodniowego wzorca: otwarte okno w zimnie, milczący czujnik, drzwi w nocy ...",
+            "uk": "Значення або активність не відповідає звичному тижневому шаблону: відчинене вікно в холод, мовчазний датчик, двері вночі ...",
+            "zh-cn": "某个值或活动与通常的每周模式不符：寒冷时窗户打开、传感器无响应、夜间开门……"
+          },
+          "severity": "notify",
+          "regex": [],
+          "limit": 20
+        }
+      ]
     }
   ]
 }

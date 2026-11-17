@@ -19,7 +19,7 @@ The implementation plan (German) is the Claude Doc "ioBroker.recorder: Umsetzung
 | M3 | frequency filter, classification by rate, 5 min aggregation, `getHistory` | done (7 day acceptance run and Echarts test open) |
 | M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | done |
 | M5 | presence simulation | done |
-| M6 | anomaly detection | open |
+| M6 | anomaly detection | done (acceptance over weeks of normal operation open) |
 
 TypeScript 6 (CommonJS output) according to `../REFACTORING.md`. Sources in `src/`, the runnable
 code is the compiled `build/` (`package.json` `main` is `build/main.js`). `build/` is gitignored.
@@ -62,6 +62,9 @@ gitignored, so `npm run build` must run before `npm pack`.
 | `src/lib/walk.ts` | walk into the past: `readSnapshot`, `readChanges` (replay), `readEventList` (journal), `readTimeline` |
 | `src/lib/walk-types.ts` | request and answer types of `getSnapshot` / `getEvents` / `getTimeline`, also imported by the tab |
 | `src/lib/simulation.ts` | presence simulation, pure: `isSimulatable`, `collectActions`, noon-to-noon days, `pickSourceDay`, `planDay`, `sunsetOf` |
+| `src/lib/stats.ts` | `HourStats` (statistics of the running hour per dp), `addToProfile` (Welford), `hourOfWeek` (local, Monday 0) |
+| `src/lib/anomaly.ts` | anomaly rules, pure: `poolProfile`, `unusualValue`, `rareActivity`, `silentLimit`, `longLimit`, `isRacing`, `AnomalyTracker` (quiet time, ack) |
+| `src/lib/detector.ts` | `AnomalyDetector` behind `DetectorHost`: hourly rows, daily rebuild, minute check, texts en/de, `renderInfo` |
 | `src/lib/simulator.ts` | `PresenceSimulation` (timers, switching, stop) behind `SimulationHost`, `planSimulatedDay`, `renderPlan` |
 | `src-tab/` | admin tab "Time machine" (React 19, MUI, gui-components, vite): `TimeMachine`, `Timeline`, `RoomTiles`, `Journal` |
 | `tasks.ts` | build of the tab into `admin/` |
@@ -80,7 +83,7 @@ gitignored, so `npm run build` must run before `npm pack`.
 - Data directory: `utils.getAbsoluteInstanceDataDir(this)` = `iobroker-data/recorder.0/`.
 - `meta.sqlite`: tables `dp` (master data; `dp.id` is the key used everywhere), `src` (deduplicated
   `from`/`user`), `rate` (measured changes per minute, high-frequency flag; schema v2), `stat_hour`,
-  `profile` (both for M6). Schema changes are migrations in `schema.ts` (`META_MIGRATIONS`), one per
+  `profile`, `baseline`, `anomaly` (M6, schema v3). Schema changes are migrations in `schema.ts` (`META_MIGRATIONS`), one per
   version in `PRAGMA user_version`.
 - `ev-YYYY-Www.sqlite`: `ev` (events), `keyframe`, `agg5` (M3). Weeks are **UTC** (Monday 00:00 UTC),
   so the file of a timestamp does not depend on time zone or DST.
@@ -138,6 +141,10 @@ loop every 200 detections. **The detector caches results per instance: always us
 | `getSnapshot` | `{ ts?, room?, category?, ids? }` | `{ ts, keyframe, states: [{ id, name, room, category, val, text, lc, from, user, src }], ms }` |
 | `getEvents` | `{ start?, end?, room?, category?, ids?, src?, limit?, newest? }` | `{ events: [{ ts, id, name, room, val, text, ack, from, user, src }], more, ms }` |
 | `getTimeline` | `{ start?, end?, buckets?, room?, category?, ids?, src? }` | `{ start, end, step, counts, first, ms }` |
+| `getAnomalies` | `{ start?, end?, open?, limit? }` (default: 7 days) | `{ anomalies: [{ id, ts, endTs, ackTs, rule, oid, name, room, val, text }] }` |
+| `getProfile` | `{ id }` | `{ id, name, learned, baseline, profile: [{ how, n, mean, sd, min, max, pActive, avgChanges }] }` |
+| `ackAnomaly` | `{ id? }` (none: all) | `{ count }` |
+| `getAnomalyInfo` | - | `{ text: html }` for the settings tab "Anomalies" |
 | `getSimulationPlan` | (unsaved) `simWeeks`, `simJitter`, `simSunset`, `simMedia`, `simScripts` | `{ text: html, start, source, actions: [{ ts, sourceTs, id, name, room, val, kind }] }` |
 
 `getHistory` follows history, sql and influxdb and uses `@iobroker/aggregate` (`sendResponse`) for
@@ -225,6 +232,45 @@ them all; `{ enabled: true }` without `mode` written by its "add state" dialog m
   switched off (`finishAfterRestart`).
 - `simDryRun` only logs. The plan of the plan preview is the running plan if the settings are the
   same, otherwise a new one (random choices differ).
+
+### Anomaly detection
+
+- **Statistics** (`HourStats`, always, also with `anomalies` off): per dp and hour the time-weighted
+  mean, min, max, last, seconds active (`isActive`: truthy number), changes, updates (every
+  `onStateChange`, also unchanged values) and the longest gap between updates. Closed at every full
+  hour into `stat_hour` (kept `STATISTICS_DAYS` = 365) plus a Welford update of `profile`
+  (`dp`, `how` = hour of the week, local time). A restart loses the running hour.
+- **Daily rebuild** (with the retention and at start if older than a day): `profile` from
+  `stat_hour` of the last `PROFILE_WEEKS` = 8 weeks (forgets seasons), `baseline` per dp (first
+  hour = `since`, hours, updates, changes, longest gap) and, from the raw events, the durations of
+  the active state of windows, doors and lights (`onP95`, `onCount`).
+- **Learned**: `since` at least `anoLearnDays` (14) days ago. Profiles are pooled: the hour of the week
+  ±1 hour and the same hour ±1 on all 7 days (`poolProfile`, loaded once per hour for all dps).
+- **Rules** (texts with room + name, `durationText`):
+  - `value` (continuous/aggregated numbers that are levels, `hasLevel`: no counters, energy, time):
+    z > `anoZ` against the pooled mean and outside the observed min/max, for `anoValueMinutes`.
+    Not while the sensor is silent (its last value is no measurement).
+  - `rare` (discrete, windows/doors, motion, light; on a change to active): share of the weeks with
+    activity in that hour below `anoRareShare` % both for the week hour and for the hour of all days.
+    While the absence state (`simTrigger`) reports absence, every motion and opening of doors and
+    windows. The lights of a running simulation never.
+  - `silent`: no update for max(4 x usual gap, `anoSilentHours`, 1.5 x longest gap); not for
+    datapoints that usually report less often than `anoSilentHours`.
+  - `long` (windows/doors, light): active longer than max(`anoLongFactor` x `onP95`, 30 min), needs
+    5 recorded durations.
+  - `cold` (windows/doors): open while the outdoor temperature (`anoOutdoor`, else the first recorded
+    weather `value.temperature*` without forecast/min/max/feel/dew/day) is below `anoColdTemp` for
+    `anoColdMinutes`; needs no profile.
+  - `racing`: the hourly changes >= 60 and > `anoRacingFactor` x usual; also every throttling by the
+    burst limit (`onThrottle`, no profile needed).
+- **Tracker**: conditions (`value`, `silent`, `long`, `cold`) run until they no longer hold (`endTs`);
+  events (`rare`, `racing`) stay open 12 h (`EVENT_OPEN`). At most one anomaly per dp and rule within
+  `anoQuietHours`; an acknowledged condition is not raised again before it ended. Restored from the
+  table `anomaly` after a restart.
+- **Output**: `anomaly.active` / `count` / `list` (JSON, at most 50) / `last`; `anomaly.ack` (button)
+  acknowledges all. Every new anomaly: `registerNotification('recorder', 'anomaly', text)` with
+  `anoNotify` (scope in io-package `notifications`, top level) and `sendTo(anoInstance, 'send',
+  { text, message, title, subject })`.
 
 ### Recording path
 

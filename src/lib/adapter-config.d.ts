@@ -71,6 +71,45 @@ declare global {
             simScripts: boolean;
             /** Only log, switch nothing */
             simDryRun: boolean;
+
+            /** Evaluate the anomaly rules (the statistics are collected anyway) */
+            anomalies: boolean;
+            /** Unusual values: z-score against the same hour of the week */
+            anoValue: boolean;
+            anoZ: number;
+            /** ... lasting this many minutes */
+            anoValueMinutes: number;
+            /** Rare activity: a door at 3 am */
+            anoRare: boolean;
+            /** % of the weeks with activity in that hour, below: rare */
+            anoRareShare: number;
+            /** Silent sensor */
+            anoSilent: boolean;
+            /** Hours without an update at least */
+            anoSilentHours: number;
+            /** Open or on unusually long */
+            anoLong: boolean;
+            /** Times the 95th percentile of the usual duration */
+            anoLongFactor: number;
+            /** Window open while it is cold outside */
+            anoCold: boolean;
+            /** °C */
+            anoColdTemp: number;
+            anoColdMinutes: number;
+            /** Outdoor temperature; empty: a recorded weather temperature */
+            anoOutdoor: string;
+            /** Racing datapoint */
+            anoRacing: boolean;
+            /** Times the usual changes per hour */
+            anoRacingFactor: number;
+            /** ioBroker notification for every new anomaly */
+            anoNotify: boolean;
+            /** Also send to this instance (telegram.0, pushover.0 ...) */
+            anoInstance: string;
+            /** At most one anomaly per datapoint and rule in this many hours */
+            anoQuietHours: number;
+            /** Days of statistics before a profile is used */
+            anoLearnDays: number;
         }
     }
 }
