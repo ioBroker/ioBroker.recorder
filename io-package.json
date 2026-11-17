@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "recorder",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "news": {
+      "0.1.0": {
+        "en": "First release. Records all relevant states automatically, without settings per state. Includes getHistory like history/sql/influxdb, the time machine with replay, presence simulation and anomaly detection.",
+        "de": "Erste Version. Zeichnet alle relevanten Datenpunkte automatisch auf, ohne Einstellungen pro Datenpunkt. Mit getHistory wie bei history/sql/influxdb, der Zeitmaschine mit Wiedergabe, Anwesenheitssimulation und Anomalieerkennung.",
+        "ru": "Первая версия. Автоматически записывает все важные состояния без настройки каждого из них. Включает getHistory как у history/sql/influxdb, машину времени с воспроизведением, имитацию присутствия и обнаружение аномалий.",
+        "pt": "Primeira versão. Grava automaticamente todos os estados relevantes, sem configuração por estado. Inclui getHistory como history/sql/influxdb, a máquina do tempo com reprodução, simulação de presença e detecção de anomalias.",
+        "nl": "Eerste versie. Registreert automatisch alle relevante states, zonder instellingen per state. Met getHistory zoals history/sql/influxdb, de tijdmachine met afspelen, aanwezigheidssimulatie en anomaliedetectie.",
+        "fr": "Première version. Enregistre automatiquement tous les états pertinents, sans réglage par état. Avec getHistory comme history/sql/influxdb, la machine à remonter le temps avec relecture, la simulation de présence et la détection d'anomalies.",
+        "it": "Prima versione. Registra automaticamente tutti gli stati rilevanti, senza impostazioni per singolo stato. Con getHistory come history/sql/influxdb, la macchina del tempo con riproduzione, la simulazione di presenza e il rilevamento delle anomalie.",
+        "es": "Primera versión. Graba automáticamente todos los estados relevantes, sin ajustes por estado. Incluye getHistory como history/sql/influxdb, la máquina del tiempo con reproducción, la simulación de presencia y la detección de anomalías.",
+        "pl": "Pierwsza wersja. Automatycznie zapisuje wszystkie istotne stany, bez ustawień dla każdego stanu. Zawiera getHistory jak history/sql/influxdb, wehikuł czasu z odtwarzaniem, symulację obecności i wykrywanie anomalii.",
+        "uk": "Перша версія. Автоматично записує всі важливі стани без налаштування кожного з них. Містить getHistory як у history/sql/influxdb, машину часу з відтворенням, імітацію присутності та виявлення аномалій.",
+        "zh-cn": "首个版本。无需逐个配置，自动记录所有相关状态。包含与 history/sql/influxdb 相同的 getHistory、可回放的时间机器、在家模拟和异常检测。"
+      },
       "0.0.1": {
         "en": "initial release",
         "de": "Erstveröffentlichung",

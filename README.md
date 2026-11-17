@@ -196,7 +196,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 -->
 
 ## Changelog
-### **WORK IN PROGRESS**
+### 0.1.0 (2026-11-17)
 * (bluefox) Initial version: storage layer, batched writing, keyframes, retention
 * (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
 * (bluefox) 5 minute aggregation for high-frequency values (energy)
