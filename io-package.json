@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "recorder",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "news": {
+      "0.1.2": {
+        "en": "Requires admin 7.6.17 or newer\nPublished with npm trusted publishing (provenance)",
+        "de": "Benötigt admin 7.6.17 oder neuer\nVeröffentlicht mit npm Trusted Publishing (Provenance)",
+        "ru": "Требуется admin 7.6.17 или новее\nОпубликовано через npm Trusted Publishing (provenance)",
+        "pt": "Requer admin 7.6.17 ou mais recente\nPublicado com npm Trusted Publishing (provenance)",
+        "nl": "Vereist admin 7.6.17 of nieuwer\nGepubliceerd met npm Trusted Publishing (provenance)",
+        "fr": "Nécessite admin 7.6.17 ou plus récent\nPublié avec npm Trusted Publishing (provenance)",
+        "it": "Richiede admin 7.6.17 o successivo\nPubblicato con npm Trusted Publishing (provenance)",
+        "es": "Requiere admin 7.6.17 o posterior\nPublicado con npm Trusted Publishing (provenance)",
+        "pl": "Wymaga admin 7.6.17 lub nowszego\nOpublikowano przez npm Trusted Publishing (provenance)",
+        "uk": "Потрібен admin 7.6.17 або новіший\nОпубліковано через npm Trusted Publishing (provenance)",
+        "zh-cn": "需要 admin 7.6.17 或更高版本\n通过 npm Trusted Publishing 发布（provenance）"
+      },
       "0.1.1": {
         "en": "README: comparison with history, sql and influxdb as a table",
         "de": "README: Vergleich mit history, sql und influxdb als Tabelle",

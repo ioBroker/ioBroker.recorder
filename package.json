@@ -1,6 +1,6 @@
 {
   "name": "iobroker.recorder",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Records all relevant states of ioBroker without per-state configuration and provides time travel, presence simulation and anomaly detection",
   "author": "bluefox <dogafox@gmail.com>",
   "contributors": [
