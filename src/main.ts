@@ -28,6 +28,16 @@ import {
     type SelectionConfig,
     type SelectionResult,
 } from './lib/selection';
+import { triggerMeansAway, windowStart } from './lib/simulation';
+import {
+    planSimulatedDay,
+    PresenceSimulation,
+    renderPlan,
+    switchableDps,
+    type SimulationHost,
+    type SimulationStatus,
+    type SimulatorSettings,
+} from './lib/simulator';
 import { classifySource } from './lib/source';
 import { DRIVER_NAME } from './lib/sqlite';
 import { Storage } from './lib/storage';
@@ -114,6 +124,26 @@ function toPatternList(value: unknown): string[] {
     return [];
 }
 
+/** A checkbox of the settings; older or hand-edited configurations may hold a string */
+function toBool(value: unknown, fallback: boolean): boolean {
+    if (value === true || value === 'true') {
+        return true;
+    }
+    if (value === false || value === 'false') {
+        return false;
+    }
+    return fallback;
+}
+
+/** A whole number of the settings within `[min, max]` */
+function toInt(value: unknown, min: number, max: number, fallback: number): number {
+    const n = Math.round(Number(value));
+    if (value === '' || value === null || value === undefined || !Number.isFinite(n)) {
+        return fallback;
+    }
+    return Math.min(max, Math.max(min, n));
+}
+
 function isSelectionObject(id: string, obj: ioBroker.Object | null | undefined): boolean {
     if (!obj || !SELECTION_TYPES.has(obj.type)) {
         return false;
@@ -167,6 +197,13 @@ class RecorderAdapter extends utils.Adapter {
     private replayStepping = false;
     /** Mirror state (own ID) by object ID, if `mirrorStates` is on */
     private readonly mirrors = new Map<string, string>();
+    /** Presence simulation, if enabled in the settings */
+    private simulation: PresenceSimulation | null = null;
+    /** The state that reports absence, and its last value (true: away) */
+    private simTrigger = '';
+    private triggerAway: boolean | null = null;
+    /** From system.config, for the sunset */
+    private coordinates: { latitude: number; longitude: number } | undefined;
 
     private flushTimer: ioBroker.Interval | null | undefined = null;
     private keyframeTimer: ioBroker.Timeout | null | undefined = null;
@@ -199,6 +236,11 @@ class RecorderAdapter extends utils.Adapter {
 
         const systemConfig = await this.getForeignObjectAsync('system.config');
         this.lang = systemConfig?.common?.language || 'en';
+        const latitude = Number(systemConfig?.common?.latitude);
+        const longitude = Number(systemConfig?.common?.longitude);
+        if (Number.isFinite(latitude) && Number.isFinite(longitude) && (latitude || longitude)) {
+            this.coordinates = { latitude, longitude };
+        }
 
         const dataDir = utils.getAbsoluteInstanceDataDir(this);
         this.storage = new Storage(dataDir);
@@ -232,6 +274,7 @@ class RecorderAdapter extends utils.Adapter {
         this.scheduleRetention();
         this.scheduleMidnight();
         await this.initReplay();
+        await this.initSimulation();
         await this.updateInfoStates(true);
     }
 
@@ -372,8 +415,10 @@ class RecorderAdapter extends utils.Adapter {
         }
         storage.deactivateAllExcept(activeIds);
 
-        if (removed.length) {
-            await this.unsubscribeForeignStatesAsync(removed);
+        // the trigger of the presence simulation stays subscribed
+        const unsubscribe = removed.filter(id => id !== this.simTrigger);
+        if (unsubscribe.length) {
+            await this.unsubscribeForeignStatesAsync(unsubscribe);
         }
         if (added.length) {
             await this.subscribeForeignStatesAsync(added);
@@ -460,6 +505,15 @@ class RecorderAdapter extends utils.Adapter {
 
             case 'getTimeline':
                 respond(this.walk(storage => readTimeline(storage, obj.message as TimelineRequest)));
+                break;
+
+            // presence simulation
+            case 'getSimulationPlan':
+                respond(
+                    this.walk(storage =>
+                        this.simulationPlan(storage, obj.message as Partial<ioBroker.AdapterConfig> | null),
+                    ),
+                );
                 break;
 
             // the commands of history, sql and influxdb
@@ -854,13 +908,193 @@ class RecorderAdapter extends utils.Adapter {
         }
     }
 
+    // ---------------------------------------------------------------- presence simulation
+
+    private simulationEnabled(): boolean {
+        return toBool(this.config.simulation, false);
+    }
+
+    private simulationSettings(override?: Partial<ioBroker.AdapterConfig> | null): SimulatorSettings {
+        const config = { ...this.config, ...override };
+        return {
+            weeks: toInt(config.simWeeks, 1, 12, 4),
+            jitter: toInt(config.simJitter, 0, 60, 15),
+            sunset: toBool(config.simSunset, true),
+            media: toBool(config.simMedia, false),
+            scripts: toBool(config.simScripts, false),
+            dryRun: toBool(config.simDryRun, false),
+            latitude: this.coordinates?.latitude,
+            longitude: this.coordinates?.longitude,
+        };
+    }
+
+    private simulationHost(): SimulationHost {
+        return {
+            log: this.log,
+            ownFrom: `system.adapter.${this.namespace}`,
+            storage: () => this.storage,
+            datapoints: () => [...this.dps.values()],
+            common: oid => this.objects[oid]?.common as Partial<ioBroker.StateCommon> | undefined,
+            getState: oid => this.getForeignStateAsync(oid),
+            setState: async (oid, val) => {
+                // from = this instance, so that it is never recorded as an action of a person
+                await this.setForeignStateAsync(oid, { val, ack: false, c: 'presence simulation' });
+            },
+            report: status => this.reportSimulation(status),
+            setTimeout: (fn, ms) => this.setTimeout(fn, ms),
+            clearTimeout: timer => this.clearTimeout(timer as ioBroker.Timeout),
+            now: () => Date.now(),
+            random: () => Math.random(),
+        };
+    }
+
+    /**
+     * Starts the simulation if the trigger reports absence. Without a trigger, a simulation that
+     * was switched on manually continues after a restart; with a trigger, the trigger decides.
+     */
+    private async initSimulation(): Promise<void> {
+        await this.subscribeStatesAsync('simulation.enabled');
+        const enabled = await this.getStateAsync('simulation.enabled');
+        const simulation = new PresenceSimulation(this.simulationHost(), this.simulationSettings(), this.lang);
+        if (!this.simulationEnabled()) {
+            if (enabled?.val === true) {
+                // switched off in the settings while it ran: the defined end state
+                await simulation.finishAfterRestart('disabled in the settings');
+            }
+            if (enabled?.val !== false) {
+                await this.setStateAsync('simulation.enabled', false, true);
+            }
+            return;
+        }
+        this.simulation = simulation;
+        this.simTrigger = String(this.config.simTrigger || '').trim();
+        if (this.simTrigger) {
+            await this.subscribeForeignStatesAsync(this.simTrigger);
+            const trigger = await this.getForeignStateAsync(this.simTrigger);
+            this.triggerAway = trigger
+                ? triggerMeansAway(trigger.val, toBool(this.config.simTriggerInvert, false))
+                : null;
+            if (this.triggerAway) {
+                await simulation.start(`${this.simTrigger} reports absence`, enabled?.val === true);
+            } else if (enabled?.val === true) {
+                await simulation.finishAfterRestart(`${this.simTrigger} reports presence`);
+            }
+        } else if (enabled?.val === true) {
+            await simulation.start('switched on before the restart', true);
+        }
+        if (!simulation.running) {
+            await this.reportSimulation({ active: false, sourceDay: '', nextAction: '', lastAction: '' });
+        }
+        await this.setStateAsync('simulation.enabled', simulation.running, true);
+    }
+
+    /** The trigger changed: absence starts the simulation, presence stops it at once */
+    private onTrigger(state: ioBroker.State | null | undefined): void {
+        const simulation = this.simulation;
+        if (!state || !simulation) {
+            return;
+        }
+        const away = triggerMeansAway(state.val, toBool(this.config.simTriggerInvert, false));
+        if (away === this.triggerAway) {
+            return;
+        }
+        this.triggerAway = away;
+        // stop() clears its timer synchronously, before the first await
+        const change = away
+            ? simulation.start(`${this.simTrigger} reports absence`)
+            : simulation.stop(`${this.simTrigger} reports presence`);
+        void change
+            .then(() => this.setStateAsync('simulation.enabled', simulation.running, true))
+            .catch(e => this.log.error(`Presence simulation: ${(e as Error).message}`));
+    }
+
+    /** `simulation.enabled` written by a person or a script */
+    private async onSimulationCommand(state: ioBroker.State): Promise<void> {
+        const on = state.val === true || state.val === 'true' || state.val === 1;
+        const simulation = this.simulation;
+        if (!simulation) {
+            if (on) {
+                this.log.warn('The presence simulation is not enabled in the instance settings');
+            }
+            await this.setStateAsync('simulation.enabled', false, true);
+            return;
+        }
+        if (on) {
+            await simulation.start('switched on');
+        } else {
+            await simulation.stop('switched off');
+        }
+        await this.setStateAsync('simulation.enabled', simulation.running, true);
+    }
+
+    private async reportSimulation(status: SimulationStatus): Promise<void> {
+        await this.setStateChangedAsync('simulation.sourceDay', status.sourceDay, true);
+        await this.setStateChangedAsync('simulation.nextAction', status.nextAction, true);
+        await this.setStateChangedAsync('simulation.lastAction', status.lastAction, true);
+    }
+
+    /**
+     * `getSimulationPlan`: the plan of the current simulated day; while the simulation runs with the
+     * same settings the running plan, else a new one (random choices differ each time).
+     */
+    private simulationPlan(
+        storage: Storage,
+        override: Partial<ioBroker.AdapterConfig> | null,
+    ): { text: string; start: number; source: number | null; actions: unknown[] } {
+        const settings = this.simulationSettings(override);
+        const now = Date.now();
+        const dps = switchableDps(
+            [...this.dps.values()],
+            oid => this.objects[oid]?.common as Partial<ioBroker.StateCommon> | undefined,
+            settings.media,
+        );
+        const running = this.simulation?.running ? this.simulation.currentPlan : null;
+        const same =
+            running &&
+            ['weeks', 'jitter', 'sunset', 'media', 'scripts'].every(
+                key =>
+                    settings[key as keyof SimulatorSettings] ===
+                    this.simulation!.settings[key as keyof SimulatorSettings],
+            );
+        const plan =
+            same && running ? running : planSimulatedDay(storage, dps, windowStart(now), settings, Math.random);
+        return {
+            text: renderPlan(plan, storage, dps.length, settings.media, now, this.lang),
+            start: plan.start,
+            source: plan.source,
+            actions: plan.actions.map(action => {
+                const dp = storage.getDpById(action.dp);
+                return {
+                    ts: action.ts,
+                    sourceTs: action.sourceTs,
+                    id: dp?.oid,
+                    name: dp?.name,
+                    room: dp?.room,
+                    val: dp?.type === 'boolean' ? action.val !== 0 : action.val,
+                    kind: action.kind,
+                };
+            }),
+        };
+    }
+
     // ---------------------------------------------------------------- recording
 
     private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
+        if (this.simTrigger && id === this.simTrigger) {
+            // the trigger may be recorded as well
+            this.onTrigger(state);
+        }
         if (id.startsWith(`${this.namespace}.`)) {
-            // the own namespace is never recorded; only the replay states are subscribed
+            // the own namespace is never recorded; only the commands of replay and simulation are subscribed
             if (state && !state.ack) {
-                void this.onReplayCommand(id.substring(this.namespace.length + 1), state);
+                const own = id.substring(this.namespace.length + 1);
+                if (own === 'simulation.enabled') {
+                    void this.onSimulationCommand(state).catch(e =>
+                        this.log.error(`Presence simulation: ${(e as Error).message}`),
+                    );
+                } else {
+                    void this.onReplayCommand(own, state);
+                }
             }
             return;
         }
@@ -1174,6 +1408,8 @@ class RecorderAdapter extends utils.Adapter {
             if (this.replayTimer) {
                 this.clearInterval(this.replayTimer);
             }
+            // nothing is switched on unload: after the restart the simulation continues
+            this.simulation?.dispose();
             this.flushTimer = null;
             this.replayTimer = null;
             this.keyframeTimer = null;

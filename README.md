@@ -14,8 +14,8 @@ a month) - without configuring every single state - and builds three features on
 
 The model is the recorder of Home Assistant.
 
-> **Status:** early development (milestone 4 of 6: walk into the past). Presence simulation and
-> anomaly detection follow.
+> **Status:** early development (milestone 5 of 6: presence simulation). Anomaly detection
+> follows.
 
 ## Selection of the states
 
@@ -106,6 +106,34 @@ sendTo('recorder.0', 'getTimeline', { start: Date.now() - 86400000, buckets: 96 
 enabled, every recorded state gets a read-only copy `recorder.0.mirror.<id with _>` that shows the
 replayed value, so a vis project can show the past without touching the real devices.
 
+## Presence simulation
+
+While nobody is at home, the instance plays the switching of lights and blinds of a recorded day on
+which somebody was at home. Enable it in the tab "Presence simulation" of the instance settings.
+
+- **Start and stop**: a state that reports absence (e.g. `0_userdata.0.away` or an armed alarm
+  system; "The state reports presence" for a state that is `true` at home), or
+  `recorder.0.simulation.enabled` by hand, from a script or a vis. The end of the absence stops the
+  simulation at once: nothing is caught up, and the lights and media it switched on are switched off.
+- **What is played**: at random one of the same weekdays 1 to 4 weeks back on which lights or blinds
+  were switched at least 3 times; if there is none, another day at home. A simulated day runs from
+  noon to noon, so the evening and the switching off at night come from the same recorded day.
+- **Who switched**: only persons - commands from user interfaces (admin, vis, apps, voice
+  assistants, Telegram ...) and switches pressed on the wall (a change reported by a device without a
+  command before). Scripts keep running anyway; their switching is played only on request. The
+  commands of the simulation itself never count.
+- **Time shift**: each group of switchings by up to ±15 minutes at random; afternoon and evening
+  additionally by the difference of the sunsets (coordinates of the system settings).
+- **What is switched**: lights (on/off, brightness) and blinds (position), optionally media on/off.
+  Heating, locks, doors, gates, sockets, valves, alarms and read-only states are never switched,
+  whatever the settings say.
+- **Test**: "Only log, switch nothing" writes each planned switching to the log. The tab shows the
+  plan for today (also before saving the settings), `sendTo('recorder.0', 'getSimulationPlan', {})`
+  returns it as data.
+
+`recorder.0.simulation.sourceDay`, `nextAction` and `lastAction` show what the simulation does. A
+running simulation continues after a restart of the instance.
+
 ## How it differs from history, sql and influxdb
 
 - The states are selected automatically by their meaning (type detector, enums, roles) instead of
@@ -142,6 +170,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 * (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like history, sql and influxdb; `common.getHistory`, so that admin and echarts offer the instance
 * (bluefox) Frequency filter (dead band, minimum interval, heartbeat, throttling) and classification of high-frequency states by their measured rate
 * (bluefox) Walk into the past: `getSnapshot`, `getEvents`, `getTimeline`, replay with mirror states and the admin tab "Time machine"
+* (bluefox) Presence simulation: replays the switching of lights and blinds of a recorded day at home, started by an absence state or by hand
 
 ## License
 The MIT License (MIT)

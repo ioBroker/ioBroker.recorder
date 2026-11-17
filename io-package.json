@@ -124,7 +124,16 @@
     "highRate": 6,
     "burstLimit": 60,
     "roleRules": [],
-    "mirrorStates": false
+    "mirrorStates": false,
+    "simulation": false,
+    "simTrigger": "",
+    "simTriggerInvert": false,
+    "simWeeks": 4,
+    "simJitter": 15,
+    "simSunset": true,
+    "simMedia": false,
+    "simScripts": false,
+    "simDryRun": false
   },
   "objects": [],
   "instanceObjects": [
@@ -228,6 +237,66 @@
           "60": "60x",
           "600": "600x"
         }
+      },
+      "native": {}
+    },
+    {
+      "_id": "simulation",
+      "type": "channel",
+      "common": {
+        "name": "Presence simulation"
+      },
+      "native": {}
+    },
+    {
+      "_id": "simulation.enabled",
+      "type": "state",
+      "common": {
+        "role": "switch",
+        "name": "Presence simulation is running (switched manually or by the trigger)",
+        "type": "boolean",
+        "read": true,
+        "write": true,
+        "def": false
+      },
+      "native": {}
+    },
+    {
+      "_id": "simulation.sourceDay",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": "Recorded day that is played",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "simulation.nextAction",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": "Next planned switching",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "simulation.lastAction",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": "Last switching of the simulation",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
       },
       "native": {}
     }

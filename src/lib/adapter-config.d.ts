@@ -52,6 +52,25 @@ declare global {
             roleRules: RecorderRoleRule[];
             /** Create `mirror.*`: a read-only copy of every recorded state, written by the replay */
             mirrorStates: boolean;
+
+            /** Use the presence simulation */
+            simulation: boolean;
+            /** State that reports absence (true: away); empty: only `simulation.enabled` */
+            simTrigger: string;
+            /** The trigger reports presence (true: at home) */
+            simTriggerInvert: boolean;
+            /** Recorded days: the same weekday 1 to N weeks back */
+            simWeeks: number;
+            /** Random shift of each group of actions, ± minutes */
+            simJitter: number;
+            /** Shift afternoon and evening by the difference of the sunsets */
+            simSunset: boolean;
+            /** Also switch media on and off */
+            simMedia: boolean;
+            /** Also play the switching of scripts */
+            simScripts: boolean;
+            /** Only log, switch nothing */
+            simDryRun: boolean;
         }
     }
 }

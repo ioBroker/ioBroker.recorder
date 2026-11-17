@@ -553,6 +553,178 @@
                     "xl": 12
                 }
             }
+        },
+        "_simulation": {
+            "type": "panel",
+            "label": "Presence simulation",
+            "items": {
+                "_simInfo": {
+                    "type": "staticText",
+                    "text": "While you are away, the simulation plays the switching of lights and blinds of a recorded day at home: the same weekday some weeks ago, shifted by a few minutes at random and by the sunset. Heating, locks, sockets, gates and read-only states are never switched. When you come back, it stops at once and switches off the lights it switched on.",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "simulation": {
+                    "type": "checkbox",
+                    "label": "Use presence simulation",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 8,
+                    "xl": 8
+                },
+                "_triggerHeader": {
+                    "type": "header",
+                    "text": "Start and stop",
+                    "size": 4,
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "simTrigger": {
+                    "type": "objectId",
+                    "label": "Absence state",
+                    "help": "Starts the simulation when it reports absence (e.g. 0_userdata.0.away or an armed alarm system) and stops it at once when it reports presence. Without a state, the simulation is switched with simulation.enabled.",
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 8,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "simTriggerInvert": {
+                    "type": "checkbox",
+                    "label": "The state reports presence (true = at home)",
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 8,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "_playHeader": {
+                    "type": "header",
+                    "text": "What is played",
+                    "size": 4,
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "simWeeks": {
+                    "type": "number",
+                    "label": "Weeks back",
+                    "help": "The same weekday 1 to N weeks ago is chosen at random; if none was at home, another day",
+                    "min": 1,
+                    "max": 12,
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "simJitter": {
+                    "type": "number",
+                    "label": "Random shift",
+                    "help": "Each group of switchings is shifted by up to this many minutes earlier or later",
+                    "min": 0,
+                    "max": 60,
+                    "unit": "min",
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "simSunset": {
+                    "type": "checkbox",
+                    "label": "Follow the sunset",
+                    "help": "Afternoon and evening are shifted by the difference of the sunsets (coordinates from the system settings)",
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 8,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "simMedia": {
+                    "type": "checkbox",
+                    "label": "Also switch media on and off",
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 8,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "simScripts": {
+                    "type": "checkbox",
+                    "label": "Also play the switching of scripts",
+                    "help": "Normally only the switching of persons is played (user interfaces, apps, switches on the wall), because scripts keep running anyway",
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 8,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "simDryRun": {
+                    "type": "checkbox",
+                    "label": "Only log, switch nothing (test)",
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 8,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "_planHeader": {
+                    "type": "header",
+                    "text": "Plan for today",
+                    "size": 4,
+                    "newLine": true,
+                    "hidden": "!data.simulation",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "_simPlan": {
+                    "type": "textSendTo",
+                    "container": "html",
+                    "command": "getSimulationPlan",
+                    "jsonData": "{\"simWeeks\": ${Number(data.simWeeks) || 4}, \"simJitter\": ${Number(data.simJitter) || 0}, \"simSunset\": ${!!data.simSunset}, \"simMedia\": ${!!data.simMedia}, \"simScripts\": ${!!data.simScripts}}",
+                    "alsoDependsOn": ["simWeeks", "simJitter", "simSunset", "simMedia", "simScripts"],
+                    "hidden": "!data.simulation",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                }
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ const { tests } = require('@iobroker/testing');
 
 const TEST_ID = '0_userdata.0.recorderTest';
 const TEMP_ID = '0_userdata.0.recorderTemperature';
+const AWAY_ID = '0_userdata.0.recorderAway';
 
 function wait(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -30,7 +31,7 @@ tests.integration(path.join(__dirname, '..'), {
     defineAdditionalTests({ suite }) {
         suite('Recording', getHarness => {
             it('records real changes and ignores timestamp-only updates', async function () {
-                this.timeout(30_000);
+                this.timeout(45_000);
                 const harness = getHarness();
 
                 await harness.objects.setObjectAsync(TEST_ID, {
@@ -45,6 +46,12 @@ tests.integration(path.join(__dirname, '..'), {
                     native: {},
                 });
                 await harness.states.setStateAsync(TEMP_ID, { val: 20, ack: true });
+                await harness.objects.setObjectAsync(AWAY_ID, {
+                    type: 'state',
+                    common: { name: 'Away', type: 'boolean', role: 'state', read: true, write: true },
+                    native: {},
+                });
+                await harness.states.setStateAsync(AWAY_ID, { val: false, ack: true });
                 await harness.changeAdapterConfig('recorder', {
                     native: {
                         includePatterns: [TEST_ID, TEMP_ID],
@@ -52,6 +59,8 @@ tests.integration(path.join(__dirname, '..'), {
                         flushInterval: 1,
                         retentionDays: 7,
                         mirrorStates: true,
+                        simulation: true,
+                        simTrigger: AWAY_ID,
                         // every change of "value", a dead band of 0.2 without delay for the temperature
                         roleRules: [
                             { role: 'value', deadband: 0, relative: false, minInterval: 0, heartbeat: 0 },
@@ -194,7 +203,24 @@ tests.integration(path.join(__dirname, '..'), {
                     s => s?.ack && s.val === false && s.ts > setAt[3],
                 );
                 assert.strictEqual(ended?.val, false, 'the replay stops at the present');
-                assert.strictEqual((await harness.states.getStateAsync(mirror))?.val, 3, 'the replay wrote the changes');
+                assert.strictEqual(
+                    (await harness.states.getStateAsync(mirror))?.val,
+                    3,
+                    'the replay wrote the changes',
+                );
+
+                // presence simulation: no day at home is recorded, but the trigger starts and stops it
+                const plan = await sendTo('getSimulationPlan', { simWeeks: 2 });
+                assert.strictEqual(typeof plan.text, 'string', JSON.stringify(plan));
+                assert.strictEqual(plan.source, null, 'no day at home recorded yet');
+                await harness.states.setStateAsync(AWAY_ID, { val: true, ack: true });
+                const started = await waitForState(harness, 'recorder.0.simulation.enabled', s => s?.val === true);
+                assert.strictEqual(started?.val, true, 'absence starts the simulation');
+                const homeAt = Date.now();
+                await harness.states.setStateAsync(AWAY_ID, { val: false, ack: true });
+                const stopped = await waitForState(harness, 'recorder.0.simulation.enabled', s => s?.val === false);
+                assert.strictEqual(stopped?.val, false, 'presence stops the simulation');
+                assert.ok(stopped.ts - homeAt < 1000, `stopped after ${stopped.ts - homeAt} ms`);
             });
         });
     },

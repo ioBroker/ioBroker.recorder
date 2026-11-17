@@ -114,11 +114,11 @@ const TEXTS = {
     },
 };
 
-function escapeHtml(text: string | null | undefined): string {
+export function escapeHtml(text: string | null | undefined): string {
     return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function format(template: string, values: Record<string, string | number>): string {
+export function format(template: string, values: Record<string, string | number>): string {
     return template.replace(/%(\w+)/g, (m, key: string) => (key in values ? String(values[key]) : m));
 }
 

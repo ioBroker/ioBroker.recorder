@@ -18,7 +18,7 @@ The implementation plan (German) is the Claude Doc "ioBroker.recorder: Umsetzung
 | M2 | selection engine (type detector, enums, roles, include/exclude, custom exclusions) | done |
 | M3 | frequency filter, classification by rate, 5 min aggregation, `getHistory` | done (7 day acceptance run and Echarts test open) |
 | M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | done |
-| M5 | presence simulation | open |
+| M5 | presence simulation | done |
 | M6 | anomaly detection | open |
 
 TypeScript 6 (CommonJS output) according to `../REFACTORING.md`. Sources in `src/`, the runnable
@@ -61,6 +61,8 @@ gitignored, so `npm run build` must run before `npm pack`.
 | `src/lib/filter.ts` | frequency filter: `filterRuleFor` (defaults per role, role rules), `ChangeFilter`, `RateMeter`, `nextRate` |
 | `src/lib/walk.ts` | walk into the past: `readSnapshot`, `readChanges` (replay), `readEventList` (journal), `readTimeline` |
 | `src/lib/walk-types.ts` | request and answer types of `getSnapshot` / `getEvents` / `getTimeline`, also imported by the tab |
+| `src/lib/simulation.ts` | presence simulation, pure: `isSimulatable`, `collectActions`, noon-to-noon days, `pickSourceDay`, `planDay`, `sunsetOf` |
+| `src/lib/simulator.ts` | `PresenceSimulation` (timers, switching, stop) behind `SimulationHost`, `planSimulatedDay`, `renderPlan` |
 | `src-tab/` | admin tab "Time machine" (React 19, MUI, gui-components, vite): `TimeMachine`, `Timeline`, `RoomTiles`, `Journal` |
 | `tasks.ts` | build of the tab into `admin/` |
 | `src/lib/history.ts` | `getHistory`: options parsed like sql (`parseHistoryRequest`), reading with border values (`readHistory`) |
@@ -136,6 +138,7 @@ loop every 200 detections. **The detector caches results per instance: always us
 | `getSnapshot` | `{ ts?, room?, category?, ids? }` | `{ ts, keyframe, states: [{ id, name, room, category, val, text, lc, from, user, src }], ms }` |
 | `getEvents` | `{ start?, end?, room?, category?, ids?, src?, limit?, newest? }` | `{ events: [{ ts, id, name, room, val, text, ack, from, user, src }], more, ms }` |
 | `getTimeline` | `{ start?, end?, buckets?, room?, category?, ids?, src? }` | `{ start, end, step, counts, first, ms }` |
+| `getSimulationPlan` | (unsaved) `simWeeks`, `simJitter`, `simSunset`, `simMedia`, `simScripts` | `{ text: html, start, source, actions: [{ ts, sourceTs, id, name, room, val, kind }] }` |
 
 `getHistory` follows history, sql and influxdb and uses `@iobroker/aggregate` (`sendResponse`) for
 the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total`, `percentile`,
@@ -188,6 +191,40 @@ them all; `{ enabled: true }` without `mode` written by its "add state" dialog m
   (a tile renders again only if its room or its highlighted IDs change). Formatters and the collator
   are cached `Intl` objects in `format.ts`: `toLocaleString` / `localeCompare` per row cost
   ~200 ms per render. Keep it that way when adding rows.
+
+### Presence simulation
+
+- **Switchable** (`isSimulatable`, checked again before every switching): `common.write !== false`;
+  never if role or device type match lock, door, gate, garage, valve, heat, thermostat, temperature,
+  alarm, siren, socket, outlet or pump. Light: boolean or `level` / `level.dimmer` /
+  `level.brightness`; shading: number with `level` / `level.blind` / `level.curtain` / `level.tilt`;
+  media (only with `simMedia`): boolean `switch` / `switch.power`. No setting widens this.
+- **Actions** (`collectActions`): commands (`ack: false`) of kind user, of kind script only with
+  `simScripts`; changes with `ack: true` of kind user or of kind adapter without a command on that
+  datapoint within 2 minutes (a switch on the wall). Commands of other adapters, the simulation
+  itself included (`from` = this instance, kind adapter), are no actions, and their echoes neither.
+  Actions of one datapoint within 1 minute are merged (last value).
+- **Days** run from local noon to noon. A day counts as at home with at least 3 actions. Source: at
+  random one of the same weekdays 1..`simWeeks` back at home, else any earlier day at home.
+- **Plan** (`planDay`): same local time of day, the first calendar day (afternoon, evening) also by
+  sunset(target) - sunset(source), one random offset of ±`simJitter` per group (gap < 2 min), a
+  datapoint keeps its order (1 min apart), clamped into the day. Sunset by the suncalc formulas,
+  coordinates from `system.config`.
+- **Runtime**: `start` plans the current day from now on (no catching up); one timer to the next
+  action, at most 1 h; an action more than 5 min overdue (suspended system) is skipped; an action is
+  skipped if the state has that value already. At noon the next day is planned and the lights it
+  switched on are switched off if they were off at the start of the new source day. `stop` clears
+  the timer synchronously first, then switches off the lights and media it switched on.
+  Commands are `ack: false` with `c: 'presence simulation'`.
+- **Trigger**: `simTrigger` (subscribed, also kept subscribed when the selection drops it); away =
+  truthy XOR `simTriggerInvert`; only changes count. `simulation.enabled` (`ack: false`) switches by
+  hand. Unload only clears the timer: after a restart it resumes (without trigger: if
+  `simulation.enabled` was true; with trigger: if the trigger says away) and takes the lights it
+  switched on from the recording (last command within 2 days from this instance). If it ran but
+  the trigger now says home, or the simulation is disabled in the settings, those lights are
+  switched off (`finishAfterRestart`).
+- `simDryRun` only logs. The plan of the plan preview is the running plan if the settings are the
+  same, otherwise a new one (random choices differ).
 
 ### Recording path
 
