@@ -79,12 +79,12 @@ class FakeHost {
     async report(status) {
         this.reports.push(status);
     }
-    setTimeout(fn, ms) {
+    startTimer(fn, ms) {
         const timer = { at: this.time + ms, fn };
         this.timers.push(timer);
         return timer;
     }
-    clearTimeout(timer) {
+    stopTimer(timer) {
         this.timers = this.timers.filter(t => t !== timer);
     }
     now() {

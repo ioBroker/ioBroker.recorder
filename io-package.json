@@ -28,19 +28,6 @@
         "pl": "Pierwsza wersja. Automatycznie zapisuje wszystkie istotne stany, bez ustawień dla każdego stanu. Zawiera getHistory jak history/sql/influxdb, wehikuł czasu z odtwarzaniem, symulację obecności i wykrywanie anomalii.",
         "uk": "Перша версія. Автоматично записує всі важливі стани без налаштування кожного з них. Містить getHistory як у history/sql/influxdb, машину часу з відтворенням, імітацію присутності та виявлення аномалій.",
         "zh-cn": "首个版本。无需逐个配置，自动记录所有相关状态。包含与 history/sql/influxdb 相同的 getHistory、可回放的时间机器、在家模拟和异常检测。"
-      },
-      "0.0.1": {
-        "en": "initial release",
-        "de": "Erstveröffentlichung",
-        "ru": "первоначальный выпуск",
-        "pt": "lançamento inicial",
-        "nl": "eerste release",
-        "fr": "version initiale",
-        "it": "rilascio iniziale",
-        "es": "lanzamiento inicial",
-        "pl": "pierwsze wydanie",
-        "uk": "початковий випуск",
-        "zh-cn": "首次发布"
       }
     },
     "titleLang": {
@@ -127,7 +114,7 @@
     ],
     "globalDependencies": [
       {
-        "admin": ">=7.0.0"
+        "admin": ">=7.6.17"
       }
     ]
   },

@@ -1005,8 +1005,8 @@ class RecorderAdapter extends utils.Adapter {
                 await this.setForeignStateAsync(oid, { val, ack: false, c: 'presence simulation' });
             },
             report: status => this.reportSimulation(status),
-            setTimeout: (fn, ms) => this.setTimeout(fn, ms),
-            clearTimeout: timer => this.clearTimeout(timer as ioBroker.Timeout),
+            startTimer: (fn, ms) => this.setTimeout(fn, ms),
+            stopTimer: timer => this.clearTimeout(timer as ioBroker.Timeout),
             now: () => Date.now(),
             random: () => Math.random(),
         };

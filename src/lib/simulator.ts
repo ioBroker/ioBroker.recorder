@@ -50,8 +50,9 @@ export interface SimulationHost {
     setState(oid: string, val: boolean | number): Promise<void>;
     /** Shows the status in `simulation.*` */
     report(status: SimulationStatus): Promise<void>;
-    setTimeout(fn: () => void, ms: number): unknown;
-    clearTimeout(timer: unknown): void;
+    /** Calls `fn` once after `ms` (the adapter's `setTimeout`, cleared on unload) */
+    startTimer(fn: () => void, ms: number): unknown;
+    stopTimer(timer: unknown): void;
     now(): number;
     random(): number;
 }
@@ -431,7 +432,7 @@ export class PresenceSimulation {
 
     private clearTimer(): void {
         if (this.timer) {
-            this.host.clearTimeout(this.timer);
+            this.host.stopTimer(this.timer);
             this.timer = null;
         }
     }
@@ -500,7 +501,7 @@ export class PresenceSimulation {
         const end = addWindows(this.plan.start, 1);
         const due = this.next < this.plan.actions.length ? this.plan.actions[this.next].ts : end;
         const wait = Math.min(Math.max(0, due - this.host.now()), MAX_WAIT);
-        this.timer = this.host.setTimeout(() => {
+        this.timer = this.host.startTimer(() => {
             this.timer = null;
             void this.tick();
         }, wait);

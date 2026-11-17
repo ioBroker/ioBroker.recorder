@@ -1,14 +1,26 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
-    directory: "/"
+    directories:
+      - "/"
+      - "/src-tab"
     schedule:
       interval: "daily"
       time: "04:00"
       timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 15
     versioning-strategy: "increase-if-necessary"
     ignore:
       - dependency-name: '@types/node'
         update-types:
           - 'version-update:semver-major'
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 15
