@@ -46,14 +46,14 @@ Not every change is worth storing. Each recorded state gets a class:
   hour): 5 minute aggregates (min, max, mean, last)
 - **discarded**: other states that change more than 60 times per minute on average
 
-| Role | Dead band | Min. interval | Heartbeat |
-| --- | --- | --- | --- |
-| `value.temperature`, `level.temperature` | 0.2 | 60 s | 1 h |
-| `value.humidity` | 2 | 60 s | 1 h |
-| `value.brightness` | 10 % | 60 s | 1 h |
-| `level.dimmer`, `level.blind` | 1 | 0 s | none |
-| `value.power` | 5 % | 60 s | 15 min |
-| other numbers | 1 % | 60 s | 1 h |
+| Role                                      | Dead band  | Min. interval  | Heartbeat  |
+|-------------------------------------------|------------|----------------|------------|
+| `value.temperature`, `level.temperature`  | 0.2        | 60 s           | 1 h        |
+| `value.humidity`                          | 2          | 60 s           | 1 h        |
+| `value.brightness`                        | 10 %       | 60 s           | 1 h        |
+| `level.dimmer`, `level.blind`             | 1          | 0 s            | none       |
+| `value.power`                             | 5 %        | 60 s           | 15 min     |
+| other numbers                             | 1 %        | 60 s           | 1 h        |
 
 The tab "Rules" overrides these values per role. A state that suddenly changes more than 60 times
 per minute (a defective sensor) is throttled and reported in the log. The tab "High frequency"
@@ -145,14 +145,14 @@ On the first start the statistics of the existing recording (up to 8 weeks) are 
 background, so with 14 days of recording the rules work at once. Only "Silent sensor" and "Racing
 datapoint" need the counted updates, which the recording does not contain: they start after 7 days.
 
-| Rule | Reports | Default |
-| --- | --- | --- |
-| Unusual value | a temperature, a power ... far from the usual value of this hour of the week (z-score) and outside of everything seen at this time | z > 3 for 30 min |
-| Rare activity | a door, a window, motion or a light in an hour in which this hardly ever happens (the front door at 3 am) | < 2 % of the weeks |
-| Silent sensor | no update for 4 times the usual interval | at least 6 h |
-| Open or on unusually long | windows, doors and lights, compared with the usual duration (95th percentile) | 1.5 times |
-| Window open in the cold | a window or door open while it is cold outside | < 5 °C for 30 min |
-| Racing datapoint | far more changes per hour than usual, or throttled by the burst limit (a defective sensor) | 10 times |
+| Rule                       | Reports                                                                                                                             | Default             |
+|----------------------------|-------------------------------------------------------------------------------------------------------------------------------------|---------------------|
+| Unusual value              | a temperature, a power ... far from the usual value of this hour of the week (z-score) and outside of everything seen at this time  | z > 3 for 30 min    |
+| Rare activity              | a door, a window, motion or a light in an hour in which this hardly ever happens (the front door at 3 am)                           | < 2 % of the weeks  |
+| Silent sensor              | no update for 4 times the usual interval                                                                                            | at least 6 h        |
+| Open or on unusually long  | windows, doors and lights, compared with the usual duration (95th percentile)                                                       | 1.5 times           |
+| Window open in the cold    | a window or door open while it is cold outside                                                                                      | < 5 °C for 30 min   |
+| Racing datapoint           | far more changes per hour than usual, or throttled by the burst limit (a defective sensor)                                          | 10 times            |
 
 - **Absence**: while the absence state of the tab "Presence simulation" reports absence, every
   motion and every opening of a door or window is reported.
@@ -167,16 +167,22 @@ datapoint" need the counted updates, which the recording does not contain: they 
   week with mean, deviation, minimum, maximum and share of activity), `ackAnomaly` (`{ id }`, without
   `id`: all).
 
-## How it differs from history, sql and influxdb
+## How it differs from `history`, `sql` and `influxdb`
 
-- The states are selected automatically by their meaning (type detector, enums, roles) instead of
-  `common.custom` per state.
-- Every change is stored together with its source (`from`, `user`), so replay and simulation know
-  who switched something.
-- Hourly keyframes answer "the state of all datapoints at time T" in milliseconds.
-- Raw data is kept for a limited time only; hourly statistics remain for long-term profiles.
+|                      | recorder                                                                                                                                                                                         | `history`, `sql`, `influxdb`                                                              |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| Which states         | selected automatically by their meaning (type detector, enums, roles), plus rules and exceptions per state                                                                                       | only states with settings in `common.custom`, configured one by one                       |
+| What is stored       | filtered by role (dead band, minimum interval, heartbeat); high-frequency numbers as 5 minute values (min, max, mean, last)                                                                      | configured per state (debounce, changes only ...)                                         |
+| How long             | 1, 7, 30 or 90 days of raw data for all states; hourly statistics for a year                                                                                                                     | configured per state, also forever                                                        |
+| Who switched         | every change with `from` and `user`, classified as user, script, adapter or system; used by journal, replay and simulation                                                                       | the source is not evaluated                                                               |
+| All states at time T | one query, answered from hourly keyframes in milliseconds (`getSnapshot`)                                                                                                                        | one `getHistory` per state                                                                |
+| Charts and scripts   | `getHistory` with the same options and aggregation (`@iobroker/aggregate`); echarts after 6.3.0 lists all recorded states, the admin object browser only states with an entry in `common.custom` | admin object browser, echarts, scripts                                                    |
+| Writing              | read only: no `storeState`, no changing or deleting of values; `q` is not stored                                                                                                                 | `storeState`, changing and deleting values (depending on the adapter)                     |
+| Database             | SQLite files in the data directory of the instance, one per week; no server                                                                                                                      | `history`: JSON files; `sql`: a database server or SQLite; `influxdb`: an InfluxDB server |
+| On top               | time machine, presence simulation, anomaly detection                                                                                                                                             | -                                                                                         |
 
-Long-term archives in raw resolution remain the job of influxdb and sql.
+The recorder runs alongside them. Long-term archives in raw resolution remain the job of
+`influxdb` and `sql`.
 
 ## Storage
 
