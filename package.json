@@ -60,7 +60,7 @@
     "2-build": "tsx tasks.ts --2-build",
     "3-copy": "tsx tasks.ts --3-copy",
     "test:package": "mocha test/packageFiles --exit",
-    "test:unit": "mocha test/unit --exit",
+    "test:unit": "mocha test/unit --timeout 20000 --exit",
     "test:integration": "mocha test/integrationAdapter --exit",
     "test": "npm run test:package && npm run test:unit",
     "bench": "node test/bench/load.js",

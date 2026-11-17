@@ -36,9 +36,7 @@ function definition(oid, extra) {
     };
 }
 
-describe('anomaly detection: statistics from the recording', function () {
-    this.timeout(20_000);
-
+describe('anomaly detection: statistics from the recording', () => {
     let dir;
     let storage;
     let window;
