@@ -17,6 +17,7 @@ import {
     type DpDefinition,
     type DpInfo,
     type Keyframe,
+    type RateInfo,
     type RecordedEvent,
     type SourceKind,
     type StoredRow,
@@ -541,6 +542,35 @@ export class Storage {
             return !result;
         });
         return result;
+    }
+
+    // ---------------------------------------------------------------- rates
+
+    /** The measured change rates by `dp.id` */
+    public loadRates(): Map<number, RateInfo> {
+        const rates = new Map<number, RateInfo>();
+        for (const row of this.metaDb.prepare('SELECT dp, perMin, maxPerMin, high, ts FROM rate').all()) {
+            rates.set(toNumber(row.dp) ?? 0, {
+                perMin: toNumber(row.perMin) ?? 0,
+                maxPerMin: toNumber(row.maxPerMin) ?? 0,
+                high: toNumber(row.high) === 1,
+                ts: toNumber(row.ts) ?? 0,
+            });
+        }
+        return rates;
+    }
+
+    /** Stores measured change rates, in one transaction */
+    public saveRates(rates: Map<number, RateInfo>): void {
+        const db = this.metaDb;
+        const upsert = db.prepare(
+            'INSERT OR REPLACE INTO rate (dp, perMin, maxPerMin, high, ts) VALUES (?, ?, ?, ?, ?)',
+        );
+        transaction(db, () => {
+            for (const [dp, rate] of rates) {
+                upsert.run(dp, rate.perMin, rate.maxPerMin, rate.high ? 1 : 0, rate.ts);
+            }
+        });
     }
 
     /** `state.from` and `state.user` of a source ID */

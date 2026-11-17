@@ -3,7 +3,7 @@ import { toNumber } from './sqlite';
 
 /**
  * Schema of `meta.sqlite`: master data, classification, statistics and profiles.
- * The version is kept in `PRAGMA user_version`; a new version needs a migration in `MIGRATIONS_META`.
+ * The version is kept in `PRAGMA user_version`; every version is one migration in `META_MIGRATIONS`.
  */
 const META_SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS dp (
@@ -88,14 +88,27 @@ CREATE TABLE IF NOT EXISTS agg5 (        -- 5 minute aggregates of high-frequenc
 );
 `;
 
-const META_VERSION = 1;
-const EVENTS_VERSION = 1;
+/** Version 2: measured change rates and the classification as high-frequency (M3) */
+const META_SCHEMA_V2 = `
+CREATE TABLE IF NOT EXISTS rate (
+    dp        INTEGER PRIMARY KEY,
+    perMin    REAL,                      -- changes per minute in the last measured hour
+    maxPerMin REAL,                      -- highest hourly rate measured
+    high      INTEGER,                   -- 1: classified as high-frequency
+    ts        INTEGER                    -- end of the last measurement
+);
+`;
+
+/** Index = version - 1. Each migration runs once, in one transaction with the version update. */
+const META_MIGRATIONS = [META_SCHEMA_V1, META_SCHEMA_V2];
+const EVENTS_MIGRATIONS = [EVENTS_SCHEMA_V1];
 
 function getVersion(db: SqliteDatabase): number {
     return toNumber(db.prepare('PRAGMA user_version').get()?.user_version) ?? 0;
 }
 
-function applySchema(db: SqliteDatabase, schema: string, version: number, fileName: string): void {
+function applySchema(db: SqliteDatabase, migrations: string[], fileName: string): void {
+    const version = migrations.length;
     const current = getVersion(db);
     if (current > version) {
         throw new Error(
@@ -105,7 +118,9 @@ function applySchema(db: SqliteDatabase, schema: string, version: number, fileNa
     if (current < version) {
         db.exec('BEGIN');
         try {
-            db.exec(schema);
+            for (let v = current; v < version; v++) {
+                db.exec(migrations[v]);
+            }
             db.exec(`PRAGMA user_version = ${version}`);
             db.exec('COMMIT');
         } catch (e) {
@@ -116,9 +131,9 @@ function applySchema(db: SqliteDatabase, schema: string, version: number, fileNa
 }
 
 export function initMetaSchema(db: SqliteDatabase): void {
-    applySchema(db, META_SCHEMA_V1, META_VERSION, 'meta.sqlite');
+    applySchema(db, META_MIGRATIONS, 'meta.sqlite');
 }
 
 export function initEventsSchema(db: SqliteDatabase, fileName: string): void {
-    applySchema(db, EVENTS_SCHEMA_V1, EVENTS_VERSION, fileName);
+    applySchema(db, EVENTS_MIGRATIONS, fileName);
 }

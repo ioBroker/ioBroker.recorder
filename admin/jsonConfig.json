@@ -9,7 +9,10 @@
                 "_logo": {
                     "type": "staticImage",
                     "src": "recorder.svg",
-                    "style": { "width": 64, "height": 64 },
+                    "style": {
+                        "width": 64,
+                        "height": 64
+                    },
                     "xs": 12,
                     "sm": 12,
                     "md": 12,
@@ -31,9 +34,18 @@
                     "type": "select",
                     "label": "Light",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "newLine": true,
                     "xs": 12,
@@ -46,9 +58,18 @@
                     "type": "select",
                     "label": "Shading",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -60,9 +81,18 @@
                     "type": "select",
                     "label": "Heating and climate",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -74,9 +104,18 @@
                     "type": "select",
                     "label": "Windows and doors",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -89,9 +128,18 @@
                     "label": "Motion and presence",
                     "help": "Motion and presence data show when somebody is at home. Off by default.",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -103,9 +151,18 @@
                     "type": "select",
                     "label": "Security",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -117,9 +174,18 @@
                     "type": "select",
                     "label": "Switches and sockets",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -131,9 +197,18 @@
                     "type": "select",
                     "label": "Media",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -145,9 +220,18 @@
                     "type": "select",
                     "label": "Weather",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -159,9 +243,18 @@
                     "type": "select",
                     "label": "Energy",
                     "options": [
-                        { "value": "off", "label": "Off" },
-                        { "value": "on", "label": "Record" },
-                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                        {
+                            "value": "off",
+                            "label": "Off"
+                        },
+                        {
+                            "value": "on",
+                            "label": "Record"
+                        },
+                        {
+                            "value": "aggregated",
+                            "label": "Aggregate (5 min)"
+                        }
                     ],
                     "xs": 12,
                     "sm": 6,
@@ -196,10 +289,22 @@
                     "label": "Keep raw data",
                     "help": "Events and keyframes older than this are deleted daily at 03:30",
                     "options": [
-                        { "value": 1, "label": "1 day" },
-                        { "value": 7, "label": "7 days" },
-                        { "value": 30, "label": "30 days" },
-                        { "value": 90, "label": "90 days" }
+                        {
+                            "value": 1,
+                            "label": "1 day"
+                        },
+                        {
+                            "value": 7,
+                            "label": "7 days"
+                        },
+                        {
+                            "value": 30,
+                            "label": "30 days"
+                        },
+                        {
+                            "value": 90,
+                            "label": "90 days"
+                        }
                     ],
                     "newLine": true,
                     "xs": 12,
@@ -257,6 +362,100 @@
                     "lg": 6,
                     "xl": 6
                 },
+                "_filterHeader": {
+                    "type": "header",
+                    "text": "Frequency filter",
+                    "size": 5,
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "_filterInfo": {
+                    "type": "staticText",
+                    "text": "Numbers are stored when they change by at least the dead band, at most once per minimum interval (then the latest value), and changes within the dead band after the heartbeat. Defaults: temperature 0.2 / 60 s / 1 h, humidity 2 / 60 s / 1 h, brightness 10 % / 60 s / 1 h, dimmer and blind 1 / 0 s / none, power 5 % / 60 s / 15 min, other numbers 1 % / 60 s / 1 h. A rule below overrides the default of its roles; * is a wildcard (e.g. value.temperature*).",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "highRate": {
+                    "type": "number",
+                    "label": "Aggregate numbers above",
+                    "help": "Changes per minute (average of an hour): such numbers are stored as 5 minute aggregates",
+                    "min": 1,
+                    "max": 600,
+                    "unit": "changes/min",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "burstLimit": {
+                    "type": "number",
+                    "label": "Throttle above",
+                    "help": "Changes per minute: protects the database from defective sensors. Other states above this average are not recorded. 0: off",
+                    "min": 0,
+                    "max": 6000,
+                    "unit": "changes/min",
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "roleRules": {
+                    "type": "table",
+                    "label": "Rules per role",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12,
+                    "items": [
+                        {
+                            "type": "text",
+                            "attr": "role",
+                            "title": "Role",
+                            "width": "30%",
+                            "default": ""
+                        },
+                        {
+                            "type": "number",
+                            "attr": "deadband",
+                            "title": "Dead band",
+                            "min": 0,
+                            "default": 0
+                        },
+                        {
+                            "type": "checkbox",
+                            "attr": "relative",
+                            "title": "in %",
+                            "default": false
+                        },
+                        {
+                            "type": "number",
+                            "attr": "minInterval",
+                            "title": "Min. interval (s)",
+                            "min": 0,
+                            "default": 60
+                        },
+                        {
+                            "type": "number",
+                            "attr": "heartbeat",
+                            "title": "Heartbeat (min)",
+                            "min": 0,
+                            "default": 60
+                        }
+                    ]
+                },
                 "_recalculate": {
                     "type": "sendTo",
                     "label": "Recalculate selection",
@@ -270,6 +469,23 @@
                     "md": 6,
                     "lg": 4,
                     "xl": 4
+                }
+            }
+        },
+        "_frequency": {
+            "type": "panel",
+            "label": "High frequency",
+            "items": {
+                "_frequencyTable": {
+                    "type": "textSendTo",
+                    "container": "html",
+                    "command": "getHighFrequency",
+                    "alsoDependsOn": ["highRate", "burstLimit"],
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         },

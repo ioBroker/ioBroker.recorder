@@ -5,6 +5,18 @@
 /** off: not recorded, on: every change, aggregated: 5 minute aggregates (numbers only) */
 type RecorderCategoryMode = 'off' | 'on' | 'aggregated';
 
+/** A rule of the table "Frequency filter per role" */
+interface RecorderRoleRule {
+    role: string;
+    deadband: number;
+    /** `deadband` in % of the last stored value */
+    relative: boolean;
+    /** seconds */
+    minInterval: number;
+    /** minutes; 0: off */
+    heartbeat: number;
+}
+
 declare global {
     namespace ioBroker {
         interface AdapterConfig {
@@ -31,6 +43,13 @@ declare global {
             catWeather: RecorderCategoryMode;
             /** Default aggregated: power meters report every few seconds */
             catEnergy: RecorderCategoryMode;
+
+            /** Numbers that change more often (per minute, average of an hour) are aggregated */
+            highRate: number;
+            /** A state is throttled above this many changes per minute; 0: never */
+            burstLimit: number;
+            /** Overrides of the frequency filter per role (pattern with `*`) */
+            roleRules: RecorderRoleRule[];
         }
     }
 }

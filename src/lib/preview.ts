@@ -70,6 +70,19 @@ const TEXTS = {
         reason: 'Reason',
         manual: 'manual',
         classes: ['discrete', 'continuous', 'aggregated', 'discarded'],
+        hfIntro:
+            'Numbers with more than %high changes per minute (average of an hour) are stored as 5 minute aggregates. ' +
+            'Other states are throttled to %burst changes per minute and not recorded above this average. ' +
+            'The rates are measured every full hour.',
+        hfOverride:
+            'To override the classification of a state, open its settings in the object browser and set "Filter" to "Every change" or "Aggregate".',
+        hfNone: 'No high-frequency states measured yet.',
+        perMin: 'Changes/min',
+        maxPerMin: 'Max/min',
+        status: 'Status',
+        high: 'high-frequency',
+        near: 'near the limit',
+        throttledAt: 'throttled at %time',
     },
     de: {
         summary: '%count Datenpunkte, ca. %month MB pro Monat (%retention MB für %days Tage)',
@@ -85,6 +98,19 @@ const TEXTS = {
         reason: 'Begründung',
         manual: 'manuell',
         classes: ['diskret', 'kontinuierlich', 'aggregiert', 'verworfen'],
+        hfIntro:
+            'Zahlen mit mehr als %high Änderungen pro Minute (Mittel einer Stunde) werden als 5-Minuten-Aggregate gespeichert. ' +
+            'Andere Datenpunkte werden auf %burst Änderungen pro Minute gedrosselt und über diesem Mittel nicht aufgezeichnet. ' +
+            'Die Raten werden zu jeder vollen Stunde gemessen.',
+        hfOverride:
+            'Um die Einstufung eines Datenpunkts zu übersteuern, seine Einstellungen im Objektbrowser öffnen und "Filter" auf "Jede Änderung" oder "Aggregieren" setzen.',
+        hfNone: 'Noch keine hochfrequenten Datenpunkte gemessen.',
+        perMin: 'Änderungen/min',
+        maxPerMin: 'Max/min',
+        status: 'Status',
+        high: 'hochfrequent',
+        near: 'nahe am Grenzwert',
+        throttledAt: 'gedrosselt um %time',
     },
 };
 
@@ -153,6 +179,73 @@ export function renderPreview(
     html.push('</table>');
     if (rows.length > MAX_ROWS) {
         html.push(`<p>${escapeHtml(format(t.more, { n: rows.length - MAX_ROWS }))}</p>`);
+    }
+    return html.join('');
+}
+
+/** One row of the admin tab "High frequency" */
+export interface HighFrequencyRow {
+    id: string;
+    name: string | null;
+    perMin: number;
+    maxPerMin: number;
+    cls: string;
+    high: boolean;
+    throttledAt: number | null;
+}
+
+/**
+ * The HTML of the admin tab "High frequency": the datapoints classified as high-frequency, near
+ * the limit or throttled, with the measured rates.
+ *
+ * @param rows the datapoints
+ * @param limits the settings
+ * @param limits.highRate changes per minute above which numbers are aggregated
+ * @param limits.burstLimit changes per minute above which a datapoint is throttled
+ * @param lang the language
+ */
+export function renderHighFrequency(
+    rows: HighFrequencyRow[],
+    limits: { highRate: number; burstLimit: number },
+    lang: ioBroker.Languages,
+): string {
+    const t = lang === 'de' ? TEXTS.de : TEXTS.en;
+    const cell = 'style="padding: 2px 8px; border-bottom: 1px solid rgba(128,128,128,0.3); text-align: left"';
+    const html: string[] = [];
+    html.push(`<p>${escapeHtml(format(t.hfIntro, { high: limits.highRate, burst: limits.burstLimit }))}</p>`);
+    html.push(`<p>${escapeHtml(t.hfOverride)}</p>`);
+    if (!rows.length) {
+        html.push(`<p><i>${escapeHtml(t.hfNone)}</i></p>`);
+        return html.join('');
+    }
+    const sorted = [...rows].sort((a, b) => b.perMin - a.perMin || a.id.localeCompare(b.id));
+    html.push('<table style="border-collapse: collapse; width: 100%; font-size: 0.9em">');
+    html.push(
+        `<tr>${[t.id, t.name, t.perMin, t.maxPerMin, t.cls, t.status].map(h => `<th ${cell}>${escapeHtml(h)}</th>`).join('')}</tr>`,
+    );
+    const classIndex = ['discrete', 'continuous', 'aggregated', 'discarded'];
+    for (const row of sorted.slice(0, MAX_ROWS)) {
+        const status: string[] = [row.high ? t.high : t.near];
+        if (row.throttledAt) {
+            status.push(format(t.throttledAt, { time: new Date(row.throttledAt).toLocaleString(lang) }));
+        }
+        const cls = classIndex.indexOf(row.cls);
+        html.push(
+            `<tr>${[
+                row.id,
+                row.name,
+                String(row.perMin),
+                String(row.maxPerMin),
+                cls >= 0 ? t.classes[cls] : row.cls,
+                status.join(', '),
+            ]
+                .map(v => `<td ${cell}>${escapeHtml(v)}</td>`)
+                .join('')}</tr>`,
+        );
+    }
+    html.push('</table>');
+    if (sorted.length > MAX_ROWS) {
+        html.push(`<p>${escapeHtml(format(t.more, { n: sorted.length - MAX_ROWS }))}</p>`);
     }
     return html.join('');
 }

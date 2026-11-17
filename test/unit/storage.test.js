@@ -42,6 +42,29 @@ describe('storage', () => {
         rmSync(dir, { recursive: true, force: true });
     });
 
+    it('stores the measured rates', () => {
+        const a = storage.upsertDp(definition('a.0.power'));
+        storage.saveRates(new Map([[a.id, { perMin: 12.5, maxPerMin: 20, high: true, ts: 1000 }]]));
+        storage.close();
+        storage = new Storage(dir);
+        storage.open();
+        assert.deepStrictEqual(storage.loadRates().get(a.id), { perMin: 12.5, maxPerMin: 20, high: true, ts: 1000 });
+    });
+
+    it('migrates meta.sqlite from version 1', () => {
+        const a = storage.upsertDp(definition('a.0.temp'));
+        storage.close();
+        const { DatabaseSync } = require('node:sqlite');
+        const db = new DatabaseSync(join(dir, 'meta.sqlite'));
+        db.exec('DROP TABLE rate; PRAGMA user_version = 1;');
+        db.close();
+
+        storage = new Storage(dir);
+        storage.open();
+        assert.strictEqual(storage.getDp('a.0.temp').id, a.id, 'the data is kept');
+        assert.strictEqual(storage.loadRates().size, 0, 'the table exists again');
+    });
+
     it('keeps datapoint IDs and sources across restarts', () => {
         const a = storage.upsertDp(definition('a.0.temp'));
         const b = storage.upsertDp(definition('a.0.switch', 'boolean'));

@@ -7,9 +7,45 @@
             "label": "Recording",
             "default": "always",
             "options": [
-                { "value": "always", "label": "Always record" },
-                { "value": "exclude", "label": "Never record" }
+                {
+                    "value": "always",
+                    "label": "Always record"
+                },
+                {
+                    "value": "auto",
+                    "label": "Automatic selection"
+                },
+                {
+                    "value": "exclude",
+                    "label": "Never record"
+                }
             ],
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "filter": {
+            "type": "select",
+            "label": "Filter",
+            "default": "auto",
+            "options": [
+                {
+                    "value": "auto",
+                    "label": "Automatic (frequency filter)"
+                },
+                {
+                    "value": "all",
+                    "label": "Every change"
+                },
+                {
+                    "value": "aggregate",
+                    "label": "Aggregate (5 min)"
+                }
+            ],
+            "hidden": "data.mode === 'exclude'",
+            "help": "Every change: no dead band, no throttling, never aggregated automatically",
             "xs": 12,
             "sm": 12,
             "md": 6,

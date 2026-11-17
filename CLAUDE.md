@@ -16,7 +16,7 @@ The implementation plan (German) is the Claude Doc "ioBroker.recorder: Umsetzung
 | --- | --- | --- |
 | M1 | scaffold, SQLite storage, batched writing, keyframes, retention | done |
 | M2 | selection engine (type detector, enums, roles, include/exclude, custom exclusions) | done |
-| M3 | frequency filter (dead band, min interval, heartbeat); done: 5 min aggregation, `getHistory` | open |
+| M3 | frequency filter, classification by rate, 5 min aggregation, `getHistory` | done (7 day acceptance run and Echarts test open) |
 | M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | open |
 | M5 | presence simulation | open |
 | M6 | anomaly detection | open |
@@ -51,6 +51,7 @@ yet because the admin is pure JsonConfig; it is added with the React admin tab i
 | `src/lib/categories.ts` | the 10 categories: detector types, recorded state names, fallback roles, negative roles |
 | `src/lib/aggregator.ts` | 5 minute aggregates (min, max, mean of samples, last) for class "aggregated" |
 | `src/lib/preview.ts` | size estimate and the HTML table of the admin tab "Preview" |
+| `src/lib/filter.ts` | frequency filter: `filterRuleFor` (defaults per role, role rules), `ChangeFilter`, `RateMeter`, `nextRate` |
 | `src/lib/history.ts` | `getHistory`: options parsed like sql (`parseHistoryRequest`), reading with border values (`readHistory`) |
 | `src/lib/storage.ts` | `Storage`: meta.sqlite + one file per week, upsert of datapoints, sources, batch write, retention |
 | `src/lib/schema.ts` | SQL schemas, versioned with `PRAGMA user_version` |
@@ -65,7 +66,9 @@ yet because the admin is pure JsonConfig; it is added with the React admin tab i
 
 - Data directory: `utils.getAbsoluteInstanceDataDir(this)` = `iobroker-data/recorder.0/`.
 - `meta.sqlite`: tables `dp` (master data; `dp.id` is the key used everywhere), `src` (deduplicated
-  `from`/`user`), `stat_hour`, `profile` (both for M6).
+  `from`/`user`), `rate` (measured changes per minute, high-frequency flag; schema v2), `stat_hour`,
+  `profile` (both for M6). Schema changes are migrations in `schema.ts` (`META_MIGRATIONS`), one per
+  version in `PRAGMA user_version`.
 - `ev-YYYY-Www.sqlite`: `ev` (events), `keyframe`, `agg5` (M3). Weeks are **UTC** (Monday 00:00 UTC),
   so the file of a timestamp does not depend on time zone or DST.
 - `dp.type` (boolean/number/string/json) is an addition to the schema of the plan: it is needed to
@@ -89,8 +92,9 @@ yet because the admin is pure JsonConfig; it is added with the React admin tab i
    (`info.*`, `indicator.connected/reachable`, `button*`, `text`, `json`, `url`) drop any candidate.
    Then the category modes (`catLight` ... `catEnergy`: off / on / aggregated) apply.
 4. **Manual**: include patterns, exclude patterns (wins over include), then
-   `common.custom[recorder.0]` with `mode: 'always' | 'exclude'` (wins over everything). The plan
-   said `enabled = false`, but the admin deletes the custom settings when they are disabled.
+   `common.custom[recorder.0]` with `mode: 'always' | 'exclude' | 'auto'` (wins over everything;
+   `auto` leaves the selection alone and only sets `filter`). The plan said `enabled = false`, but
+   the admin deletes the custom settings when they are disabled.
 
 `system.*` and the own namespace are never selected automatically. An alias and its target carry
 the same values: the alias is kept, the target dropped (unless included manually).
@@ -112,6 +116,7 @@ loop every 200 detections. **The detector caches results per instance: always us
 | `features` | - | `{ supportedFeatures: [] }` (no update/delete/storeState) |
 | `getEnabledDPs` | - | `{ [id]: { enabled, category, cls, reason } }` of the recorded states |
 | `enableHistory` / `disableHistory` | `{ id, options? }` | sets `common.custom[recorder.0].mode` to `always` / `exclude` |
+| `getHighFrequency` | - | `{ text: html }` for the admin tab "High frequency" |
 
 `getHistory` follows history, sql and influxdb and uses `@iobroker/aggregate` (`sendResponse`) for
 the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total`, `percentile`,
@@ -129,16 +134,27 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
 
 ### Recording path
 
-1. `onStateChange` encodes the value and compares it with the value cache. Only real changes of
-   value **or ack** are recorded; timestamp-only updates are dropped. Numbers of class
-   "aggregated" go to the `Aggregator` instead (every sample, also unchanged ones); finished
-   intervals are written with the next flush into `agg5`, running ones on unload.
-2. Events go into `buffer`; the flush timer (`flushInterval`, default 30 s) writes them in one
+1. `onStateChange` encodes the value and compares it with the value cache (the latest value, also
+   if it was not stored). Timestamp-only updates are dropped. Value changes are counted for the
+   rate. Numbers of class "aggregated" go to the `Aggregator` instead (every sample, also
+   unchanged ones); finished intervals are written with the next flush into `agg5`, running ones
+   on unload. Class "discarded" is only counted.
+2. The `ChangeFilter` decides: "discrete" stores every change of value or ack; "continuous"
+   applies the rule of the role (dead band absolute or in %, minimum interval with the latest value
+   stored when it is over, heartbeat for changes within the dead band; ack-only changes are not
+   stored). Every datapoint is throttled to `burstLimit` stored changes per minute, unless its
+   custom `filter` is `all`. Held changes are stored by `due()` with every flush, all of them on
+   unload (`takeHeld`). The base of the dead band after a start is the initial value.
+3. Every full hour `RateMeter` gives the changes per minute (`nextRate`: high above `highRate`,
+   normal again below half of it). The rates go to the table `rate`; if a classification
+   changes, the selection runs again: high-frequency numbers become "aggregated", other states
+   above `burstLimit` per minute "discarded". The custom `filter` (`all`, `aggregate`) overrides.
+4. Events go into `buffer`; the flush timer (`flushInterval`, default 30 s) writes them in one
    transaction per week file. A buffer of `MAX_BATCH` events is written immediately.
-3. If writing fails, the events stay in the buffer (at most `MAX_BUFFER`, older ones are dropped
+5. If writing fails, the events stay in the buffer (at most `MAX_BUFFER`, older ones are dropped
    with an error in the log).
-4. Keyframes from the value cache at start and at every full hour, written together with the buffer.
-5. Retention at start and daily at 03:30 local time: deletes week files completely before the cutoff
+6. Keyframes from the value cache at start and at every full hour, written together with the buffer.
+7. Retention at start and daily at 03:30 local time: deletes week files completely before the cutoff
    and trims the oldest remaining file to the exact cutoff.
 
 The own namespace is never recorded (the info states change with every write).

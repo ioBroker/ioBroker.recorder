@@ -8,20 +8,30 @@ import { sendResponse, type IobDataEntry } from '@iobroker/aggregate';
 
 import { Aggregator } from './lib/aggregator';
 import { categoryModes } from './lib/categories';
+import {
+    ChangeFilter,
+    filterRuleFor,
+    nextRate,
+    parseRoleRules,
+    RateMeter,
+    type DpFilter,
+    type RoleRule,
+} from './lib/filter';
 import { parseHistoryRequest, readHistory } from './lib/history';
-import { estimateSize, renderPreview, summaryText } from './lib/preview';
+import { estimateSize, renderHighFrequency, renderPreview, summaryText } from './lib/preview';
 import {
     aliasTarget,
     computeSelection,
     DeviceDetection,
     type Candidate,
+    type RecorderCustom,
     type SelectionConfig,
     type SelectionResult,
 } from './lib/selection';
 import { classifySource } from './lib/source';
 import { DRIVER_NAME } from './lib/sqlite';
 import { Storage } from './lib/storage';
-import { DpClass, type DpInfo, type Keyframe, type RecordedEvent, type StoredValue } from './lib/types';
+import { DpClass, type DpInfo, type Keyframe, type RateInfo, type RecordedEvent, type StoredValue } from './lib/types';
 import { encodeValue, sameValue } from './lib/values';
 
 const HOUR = 3_600_000;
@@ -38,10 +48,15 @@ const RETENTION_HOUR = 3;
 const RETENTION_MINUTE = 30;
 /** Object changes are collected for this time, then the selection is computed again */
 const RESELECT_DELAY = 30_000;
+/** Defaults of the frequency filter settings, changes per minute */
+const DEFAULT_HIGH_RATE = 6;
+const DEFAULT_BURST_LIMIT = 60;
+/** At most one warning per throttled datapoint and hour */
+const THROTTLE_LOG_INTERVAL = HOUR;
 /** Object types the selection looks at */
 const SELECTION_TYPES = new Set<string>(['state', 'channel', 'device', 'folder', 'enum']);
 
-/** Last stored value of a datapoint, to detect real changes */
+/** Last value of a datapoint (also if the filter did not store it), to detect real changes and for keyframes */
 interface CachedValue extends StoredValue {
     ack: boolean;
 }
@@ -77,10 +92,14 @@ function localMidnight(now: Date = new Date()): number {
     return midnight.getTime();
 }
 
-/** `chips` stores an array; older or hand-edited configurations may hold a string */
+/** `chips` stores an array; older or hand-edited configurations may hold a string or an object */
 function toPatternList(value: unknown): string[] {
     if (Array.isArray(value)) {
         return value.filter((v): v is string => typeof v === 'string');
+    }
+    if (value && typeof value === 'object') {
+        // a deep merge of the settings turns arrays into objects with the indexes as keys
+        return Object.values(value).filter((v): v is string => typeof v === 'string');
     }
     if (typeof value === 'string') {
         return value.split(/[,;\n]/);
@@ -112,6 +131,18 @@ class RecorderAdapter extends utils.Adapter {
     /** Last stored value per `dp.id` */
     private readonly cache = new Map<number, CachedValue>();
     private readonly aggregator = new Aggregator();
+    /** Frequency filter: dead band, minimum interval, heartbeat, burst limit */
+    private readonly filter = new ChangeFilter(DEFAULT_BURST_LIMIT);
+    /** Filter of every recorded datapoint by `dp.id` */
+    private readonly filters = new Map<number, DpFilter>();
+    private roleRules: RoleRule[] = [];
+    private highRate = DEFAULT_HIGH_RATE;
+    /** Changes per minute, measured hourly */
+    private rateMeter = new RateMeter(Date.now());
+    /** Measured rates by `dp.id` */
+    private rates = new Map<number, RateInfo>();
+    /** Last throttle warning per `dp.id` */
+    private readonly throttled = new Map<number, number>();
     /** Events not yet written */
     private buffer: RecordedEvent[] = [];
     private droppedEvents = 0;
@@ -144,6 +175,13 @@ class RecorderAdapter extends utils.Adapter {
             ? Number(this.config.retentionDays)
             : 30;
         const flushInterval = Math.max(1, Number(this.config.flushInterval) || 30);
+        this.highRate = Number(this.config.highRate) > 0 ? Number(this.config.highRate) : DEFAULT_HIGH_RATE;
+        this.filter.burstLimit =
+            Number(this.config.burstLimit) >= 0 && this.config.burstLimit !== ('' as unknown)
+                ? Number(this.config.burstLimit)
+                : DEFAULT_BURST_LIMIT;
+        this.roleRules = parseRoleRules(this.config.roleRules);
+        this.filter.onThrottle = dp => this.onThrottle(dp);
 
         const systemConfig = await this.getForeignObjectAsync('system.config');
         this.lang = systemConfig?.common?.language || 'en';
@@ -158,6 +196,8 @@ class RecorderAdapter extends utils.Adapter {
             return;
         }
         this.log.info(`Database in ${dataDir} (${DRIVER_NAME}), retention ${this.retentionDays} days`);
+        this.rates = this.storage.loadRates();
+        this.rateMeter = new RateMeter(Date.now());
 
         await this.loadObjects();
         await this.subscribeForeignObjectsAsync('*');
@@ -233,6 +273,8 @@ class RecorderAdapter extends utils.Adapter {
             excludePatterns: toPatternList(config.excludePatterns),
             ownNamespace: this.namespace,
             lang: this.lang,
+            rates: this.ratesByOid(),
+            extremeRate: this.filter.burstLimit || undefined,
         };
     }
 
@@ -285,8 +327,15 @@ class RecorderAdapter extends utils.Adapter {
                 if (!this.dps.has(id)) {
                     added.push(id);
                 }
+                const previous = this.dps.get(id);
+                if (previous && previous.cls !== dp.cls) {
+                    // e.g. classified as high-frequency: start anew with the new class
+                    this.filter.remove(dp.id);
+                    this.aggregator.remove(dp.id);
+                }
                 this.dps.set(id, dp);
                 this.reasons.set(id, selected.reason);
+                this.filters.set(dp.id, this.filterOf(id, dp));
                 const obj = this.objects[id];
                 const target = obj?.type === 'state' ? aliasTarget(obj) : null;
                 if (target) {
@@ -300,6 +349,8 @@ class RecorderAdapter extends utils.Adapter {
             if (dp) {
                 this.cache.delete(dp.id);
                 this.aggregator.remove(dp.id);
+                this.filter.remove(dp.id);
+                this.filters.delete(dp.id);
             }
             this.dps.delete(id);
             this.reasons.delete(id);
@@ -335,7 +386,10 @@ class RecorderAdapter extends utils.Adapter {
             for (const [id, state] of Object.entries(states)) {
                 const dp = this.dps.get(id);
                 if (dp && state && !this.cache.has(dp.id)) {
-                    this.cache.set(dp.id, { ...encodeValue(state.val, dp.type), ack: !!state.ack });
+                    const stored = encodeValue(state.val, dp.type);
+                    this.cache.set(dp.id, { ...stored, ack: !!state.ack });
+                    // the value is in the next keyframe: the dead band starts from it
+                    this.filter.setBase(dp.id, stored.val, state.ts || Date.now());
                 }
             }
         }
@@ -359,6 +413,10 @@ class RecorderAdapter extends utils.Adapter {
 
             case 'previewSelection':
                 respond(this.previewSelection(obj.message as Partial<ioBroker.AdapterConfig> | undefined));
+                break;
+
+            case 'getHighFrequency':
+                respond(this.highFrequencyInfo());
                 break;
 
             case 'recalculate':
@@ -537,32 +595,51 @@ class RecorderAdapter extends utils.Adapter {
         const stored = encodeValue(state.val, dp.type);
         const ack = !!state.ack;
 
-        if (dp.cls === DpClass.Aggregated && stored.val !== null) {
+        const previous = this.cache.get(dp.id);
+        const changed = !previous || !sameValue(previous, stored);
+        if (changed) {
+            this.rateMeter.count(dp.id);
+        }
+
+        if (dp.cls === DpClass.Aggregated) {
             // every sample counts for the mean, also unchanged ones
-            this.aggregator.add(dp.id, ts, stored.val);
+            if (stored.val !== null) {
+                this.aggregator.add(dp.id, ts, stored.val);
+            }
             this.cache.set(dp.id, { ...stored, ack });
             return;
         }
-
-        const previous = this.cache.get(dp.id);
-        if (previous && previous.ack === ack && sameValue(previous, stored)) {
+        if (!changed && previous.ack === ack) {
             // only the timestamp was updated
             return;
         }
         this.cache.set(dp.id, { ...stored, ack });
-        this.buffer.push({
-            ts,
-            dp: dp.id,
-            val: stored.val,
-            sval: stored.sval,
-            ack,
-            src: storage.getSourceId(state.from, state.user, classifySource(state.from)),
-        });
-        this.eventsToday++;
-
-        if (this.buffer.length >= MAX_BATCH) {
-            this.flush();
+        if (dp.cls === DpClass.Discarded) {
+            return;
         }
+        const event = this.filter.offer(
+            {
+                ts,
+                dp: dp.id,
+                val: stored.val,
+                sval: stored.sval,
+                ack,
+                src: storage.getSourceId(state.from, state.user, classifySource(state.from)),
+            },
+            this.filters.get(dp.id) || { rule: null, burst: true },
+        );
+        if (event) {
+            this.record(event);
+            if (this.buffer.length >= MAX_BATCH) {
+                this.flush();
+            }
+        }
+    }
+
+    /** Puts an event into the buffer */
+    private record(event: RecordedEvent): void {
+        this.buffer.push(event);
+        this.eventsToday++;
     }
 
     /** The state of all recorded datapoints, from the value cache */
@@ -588,7 +665,13 @@ class RecorderAdapter extends utils.Adapter {
         if (!storage) {
             return;
         }
-        const aggregates = final ? this.aggregator.takeAll() : this.aggregator.takeClosed(Date.now());
+        const now = Date.now();
+        // changes held back by the filter whose time has come; on unload all, so the last state is known
+        const held = final ? this.filter.takeHeld() : this.filter.due(now, dp => this.filters.get(dp));
+        for (const event of held) {
+            this.record(event);
+        }
+        const aggregates = final ? this.aggregator.takeAll() : this.aggregator.takeClosed(now);
         if (!this.buffer.length && !aggregates.length && !keyframe?.rows.length) {
             return;
         }
@@ -630,6 +713,112 @@ class RecorderAdapter extends utils.Adapter {
         }
     }
 
+    // ---------------------------------------------------------------- frequency filter
+
+    /** The filter of a recorded datapoint, from its class, role and per-state setting */
+    private filterOf(id: string, dp: DpInfo): DpFilter {
+        const common = this.objects[id]?.common as ioBroker.StateCommon | undefined;
+        const custom = common?.custom?.[this.namespace] as RecorderCustom | undefined;
+        // "every change" is the positive list: no burst limit either
+        const burst = !(custom?.enabled && custom.filter === 'all');
+        if (dp.cls !== DpClass.Continuous) {
+            return { rule: null, burst };
+        }
+        return { rule: filterRuleFor(common || {}, this.roleRules), burst };
+    }
+
+    /** The high-frequency datapoints by object ID, for the selection */
+    private ratesByOid(): Map<string, RateInfo> {
+        const result = new Map<string, RateInfo>();
+        for (const [dpId, rate] of this.rates) {
+            if (rate.high) {
+                const oid = this.storage?.getDpById(dpId)?.oid;
+                if (oid) {
+                    result.set(oid, rate);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Hourly: the changes per minute of every recorded datapoint. If a datapoint becomes or stops
+     * being high-frequency, the selection runs again and changes its class.
+     */
+    private evaluateRates(): void {
+        const storage = this.storage;
+        if (!storage) {
+            return;
+        }
+        const now = Date.now();
+        const ids = [...this.dps.values()].map(dp => dp.id);
+        const measured = this.rateMeter.close(now, ids);
+        if (!measured) {
+            return;
+        }
+        const updates = new Map<number, RateInfo>();
+        const switched: string[] = [];
+        for (const dp of this.dps.values()) {
+            const perMin = measured.get(dp.id) ?? 0;
+            const previous = this.rates.get(dp.id);
+            if (!previous && !perMin) {
+                continue;
+            }
+            const rate = nextRate(previous, perMin, this.highRate, now);
+            updates.set(dp.id, rate);
+            this.rates.set(dp.id, rate);
+            if (rate.high !== !!previous?.high) {
+                switched.push(`${dp.oid} (${perMin}/min${rate.high ? '' : ', normal again'})`);
+            }
+        }
+        try {
+            storage.saveRates(updates);
+        } catch (e) {
+            this.log.error(`Cannot store the rates: ${(e as Error).message}`);
+        }
+        if (switched.length) {
+            this.log.info(`High-frequency classification changed: ${switched.join(', ')}`);
+            void this.updateSelection();
+        }
+    }
+
+    private onThrottle(dpId: number): void {
+        const now = Date.now();
+        const last = this.throttled.get(dpId);
+        this.throttled.set(dpId, now);
+        if (last && now - last < THROTTLE_LOG_INTERVAL) {
+            return;
+        }
+        const oid = this.storage?.getDpById(dpId)?.oid || dpId;
+        this.log.warn(
+            `${oid} changes more than ${this.filter.burstLimit} times per minute and is throttled (defective sensor?)`,
+        );
+    }
+
+    /** The table of the admin tab "High frequency" (`textSendTo`) */
+    private highFrequencyInfo(): { text: string } {
+        const rows = [];
+        for (const [id, dp] of this.dps) {
+            const rate = this.rates.get(dp.id);
+            const throttledAt = this.throttled.get(dp.id);
+            if (!rate?.high && !throttledAt && !(rate && rate.perMin > this.highRate / 2)) {
+                continue;
+            }
+            rows.push({
+                id,
+                name: dp.name,
+                perMin: rate?.perMin ?? 0,
+                maxPerMin: rate?.maxPerMin ?? 0,
+                cls: CLASS_NAMES[dp.cls] || 'discrete',
+                high: !!rate?.high,
+                throttledAt: throttledAt ?? null,
+            });
+        }
+        return {
+            text: renderHighFrequency(rows, { highRate: this.highRate, burstLimit: this.filter.burstLimit }, this.lang),
+        };
+    }
+
     // ---------------------------------------------------------------- timers
 
     /** A keyframe at every full hour */
@@ -639,6 +828,7 @@ class RecorderAdapter extends utils.Adapter {
         this.keyframeTimer = this.setTimeout(() => {
             this.keyframeTimer = null;
             this.flush(this.createKeyframe());
+            this.evaluateRates();
             this.scheduleKeyframe();
         }, next - now);
     }

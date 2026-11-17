@@ -88,3 +88,15 @@ export interface StoredRow extends StoredValue {
     /** ID in the table `src`; `null` for values from a keyframe */
     src: number | null;
 }
+
+/** Measured change rate of a datapoint (table `rate`) */
+export interface RateInfo {
+    /** Changes per minute in the last measured hour */
+    perMin: number;
+    /** Highest hourly rate measured */
+    maxPerMin: number;
+    /** Classified as high-frequency (with hysteresis) */
+    high: boolean;
+    /** End of the last measurement */
+    ts: number;
+}

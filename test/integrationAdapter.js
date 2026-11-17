@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const { tests } = require('@iobroker/testing');
 
 const TEST_ID = '0_userdata.0.recorderTest';
+const TEMP_ID = '0_userdata.0.recorderTemperature';
 
 function wait(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -38,14 +39,30 @@ tests.integration(path.join(__dirname, '..'), {
                     native: {},
                 });
                 await harness.states.setStateAsync(TEST_ID, { val: 0, ack: true });
+                await harness.objects.setObjectAsync(TEMP_ID, {
+                    type: 'state',
+                    common: { name: 'Temperature', type: 'number', role: 'value.temperature', read: true, write: true },
+                    native: {},
+                });
+                await harness.states.setStateAsync(TEMP_ID, { val: 20, ack: true });
                 await harness.changeAdapterConfig('recorder', {
-                    native: { includePatterns: [TEST_ID], excludePatterns: [], flushInterval: 1, retentionDays: 7 },
+                    native: {
+                        includePatterns: [TEST_ID, TEMP_ID],
+                        excludePatterns: [],
+                        flushInterval: 1,
+                        retentionDays: 7,
+                        // every change of "value", a dead band of 0.2 without delay for the temperature
+                        roleRules: [
+                            { role: 'value', deadband: 0, relative: false, minInterval: 0, heartbeat: 0 },
+                            { role: 'value.temperature', deadband: 0.2, relative: false, minInterval: 0, heartbeat: 0 },
+                        ],
+                    },
                 });
                 const startedAt = Date.now();
                 await harness.startAdapterAndWait();
 
-                const count = await waitForState(harness, 'recorder.0.info.recordedCount', s => s?.val === 1);
-                assert.strictEqual(count?.val, 1, 'one state must be selected');
+                const count = await waitForState(harness, 'recorder.0.info.recordedCount', s => s?.val === 2);
+                assert.strictEqual(count?.val, 2, 'two states must be selected');
                 // the test directory survives between runs: today's events of earlier runs are counted too
                 const before = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.ts >= startedAt);
                 const baseline = before?.val || 0;
@@ -55,9 +72,29 @@ tests.integration(path.join(__dirname, '..'), {
                     await harness.states.setStateAsync(TEST_ID, { val, ack: true });
                     await wait(50);
                 }
+                for (const val of [20.1, 20.3, 20.4, 21]) {
+                    // the dead band of 0.2 keeps 20.3 and 21
+                    await harness.states.setStateAsync(TEMP_ID, { val, ack: true });
+                    await wait(50);
+                }
 
-                const events = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.val >= baseline + 3);
-                assert.strictEqual(events?.val, baseline + 3, 'three changes must be recorded');
+                const events = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.val >= baseline + 5);
+                if (events?.val !== baseline + 5) {
+                    const read = id =>
+                        new Promise(resolve =>
+                            harness.sendTo(
+                                'recorder.0',
+                                'getHistory',
+                                { id, options: { start: startedAt - 60_000, aggregate: 'none' } },
+                                resolve,
+                            ),
+                        );
+                    const recorded = [];
+                    for (const id of [TEST_ID, TEMP_ID]) {
+                        recorded.push(`${id}: ${JSON.stringify((await read(id)).result)}`);
+                    }
+                    assert.fail(`five changes must be recorded, got ${events?.val - baseline}: ${recorded.join('; ')}`);
+                }
 
                 const size = await harness.states.getStateAsync('recorder.0.info.dbSize');
                 assert.ok(size?.val > 0, 'the database must exist');
@@ -100,6 +137,19 @@ tests.integration(path.join(__dirname, '..'), {
                     average.result.some(e => e.val === 3),
                     `the aggregation must find the maximum: ${JSON.stringify(average.result)}`,
                 );
+
+                const temperature = await sendTo('getHistory', {
+                    id: TEMP_ID,
+                    options: { start: startedAt, aggregate: 'none', removeBorderValues: true },
+                });
+                assert.deepStrictEqual(
+                    temperature.result.map(e => e.val).slice(-2),
+                    [20.3, 21],
+                    'the dead band must drop 20.1 and 20.4',
+                );
+
+                const highFrequency = await sendTo('getHighFrequency', null);
+                assert.strictEqual(typeof highFrequency.text, 'string');
 
                 const features = await sendTo('features', null);
                 assert.deepStrictEqual(features.supportedFeatures, []);

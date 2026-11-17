@@ -160,6 +160,36 @@ describe('selection', () => {
         assert.ok(!selected.has('zigbee.0.sensor.temperature'));
     });
 
+    it('applies the per-state filter and the automatic mode', () => {
+        const objects = createObjects();
+        const custom = settings => ({ 'recorder.0': { enabled: true, ...settings } });
+        objects['zigbee.0.sensor.temperature'].common.custom = custom({ mode: 'auto', filter: 'all' });
+        objects['zigbee.0.lamp.brightness'].common.custom = custom({ mode: 'always', filter: 'aggregate' });
+        objects['0_userdata.0.counter'].common.custom = custom({ mode: 'auto', filter: 'all' });
+        const { selected } = computeSelection(objects, config());
+
+        const temperature = selected.get('zigbee.0.sensor.temperature');
+        assert.strictEqual(temperature.cls, DpClass.Discrete);
+        assert.ok(temperature.reason.startsWith('Type detector'), 'mode "auto" keeps the reason');
+        assert.ok(temperature.reason.includes('every change'));
+        assert.strictEqual(selected.get('zigbee.0.lamp.brightness').cls, DpClass.Aggregated);
+        assert.ok(!selected.has('0_userdata.0.counter'), 'mode "auto" does not select');
+    });
+
+    it('classifies by the measured rate', () => {
+        const rates = new Map([
+            ['zigbee.0.sensor.temperature', { perMin: 12, maxPerMin: 12, high: true, ts: 0 }],
+            ['zigbee.0.lamp.state', { perMin: 100, maxPerMin: 100, high: true, ts: 0 }],
+            ['0_userdata.0.kitchenLight', { perMin: 10, maxPerMin: 10, high: true, ts: 0 }],
+        ]);
+        const { selected } = computeSelection(createObjects(), config({ rates, extremeRate: 60 }));
+        const temperature = selected.get('zigbee.0.sensor.temperature');
+        assert.strictEqual(temperature.cls, DpClass.Aggregated);
+        assert.ok(temperature.reason.includes('12/min'), temperature.reason);
+        assert.strictEqual(selected.get('zigbee.0.lamp.state').cls, DpClass.Discarded, 'a boolean at 100/min');
+        assert.strictEqual(selected.get('0_userdata.0.kitchenLight').cls, DpClass.Discrete, 'below the extreme rate');
+    });
+
     it('updates the detection incrementally with the same result as a full run', async () => {
         const objects = createObjects();
         const detection = new DeviceDetection('recorder.0');

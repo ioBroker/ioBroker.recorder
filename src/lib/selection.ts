@@ -10,14 +10,16 @@ import {
     type CategoryMode,
 } from './categories';
 import { PatternList } from './patterns';
-import { DpClass, type DpDefinition } from './types';
+import { DpClass, type DpDefinition, type RateInfo } from './types';
 import { valueTypeOf } from './values';
 
 /** Settings of the per-state dialog (`common.custom[recorder.0]`) */
 export interface RecorderCustom {
     enabled?: boolean;
-    /** always: record even if the automatic selection does not; exclude: never record */
-    mode?: 'always' | 'exclude';
+    /** always: record even if the automatic selection does not; exclude: never record; auto: as selected */
+    mode?: 'always' | 'exclude' | 'auto';
+    /** auto: frequency filter and classification; all: every change; aggregate: 5 minute aggregates */
+    filter?: 'auto' | 'all' | 'aggregate';
 }
 
 export interface SelectionConfig {
@@ -29,6 +31,10 @@ export interface SelectionConfig {
     /** e.g. `recorder.0`: never recorded itself, and the key of the per-state settings */
     ownNamespace: string;
     lang: ioBroker.Languages;
+    /** Measured rates of datapoints by object ID (only the high-frequency ones are needed) */
+    rates?: Map<string, RateInfo>;
+    /** Changes per minute above which a datapoint that cannot be aggregated is not recorded */
+    extremeRate?: number;
 }
 
 /** A selected datapoint with the reason, why it was selected */
@@ -86,6 +92,39 @@ export function initialClass(common: ioBroker.StateCommon, mode: CategoryMode | 
         return mode === 'aggregated' ? DpClass.Aggregated : DpClass.Continuous;
     }
     return DpClass.Discrete;
+}
+
+/**
+ * The class of a selected datapoint: from the type and the category mode, then the per-state
+ * setting `filter`, then the measured rate. A number without `states` that changes too often is
+ * aggregated; anything else is only dropped at the extreme rate.
+ */
+function classify(
+    id: string,
+    common: ioBroker.StateCommon,
+    mode: CategoryMode | undefined,
+    custom: RecorderCustom | undefined,
+    config: SelectionConfig,
+): { cls: DpClass; note?: string } {
+    const aggregatable = common.type === 'number' && !common.states;
+    const filter = custom?.enabled ? custom.filter : undefined;
+    if (filter === 'all') {
+        return { cls: DpClass.Discrete, note: 'every change (custom)' };
+    }
+    if (filter === 'aggregate' && aggregatable) {
+        return { cls: DpClass.Aggregated, note: 'aggregated (custom)' };
+    }
+    const cls = initialClass(common, mode);
+    const rate = config.rates?.get(id);
+    if (rate?.high && cls !== DpClass.Aggregated) {
+        if (aggregatable) {
+            return { cls: DpClass.Aggregated, note: `${rate.perMin}/min: aggregated` };
+        }
+        if (config.extremeRate && rate.perMin > config.extremeRate) {
+            return { cls: DpClass.Discarded, note: `${rate.perMin}/min: discarded` };
+        }
+    }
+    return { cls };
 }
 
 function buildEnumIndex(objects: Record<string, ioBroker.Object>, lang: ioBroker.Languages): Map<string, EnumInfo> {
@@ -460,7 +499,7 @@ export function computeSelection(
                     drop('custom exclude');
                 }
                 take = false;
-            } else {
+            } else if (custom.mode !== 'auto') {
                 take = true;
                 reason = 'Custom: always';
             }
@@ -470,6 +509,10 @@ export function computeSelection(
         }
 
         const category = candidate?.category || null;
+        const classified = classify(id, common, category ? config.categories[category] : undefined, custom, config);
+        if (classified.note) {
+            reason = reason ? `${reason}; ${classified.note}` : classified.note;
+        }
         selected.set(id, {
             oid: id,
             name: translatedName(common.name, config.lang),
@@ -479,7 +522,7 @@ export function computeSelection(
             unit: common.unit || null,
             devType: candidate?.devType || null,
             category,
-            cls: initialClass(common, category ? config.categories[category] : undefined),
+            cls: classified.cls,
             type: valueTypeOf(common.type),
             states: common.states ? JSON.stringify(common.states) : null,
             reason,

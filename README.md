@@ -14,8 +14,8 @@ a month) - without configuring every single state - and builds three features on
 
 The model is the recorder of Home Assistant.
 
-> **Status:** early development (milestone 2 of 6: automatic selection). Replay, presence
-> simulation and anomaly detection follow.
+> **Status:** early development (milestone 3 of 6: recording with frequency filter). Replay,
+> presence simulation and anomaly detection follow.
 
 ## Selection of the states
 
@@ -34,6 +34,31 @@ values. Motion and presence are **off** by default for privacy; energy is aggreg
 
 The tab "Preview" in the instance settings shows which states would be recorded, with the reason
 and a size estimate, before the settings are saved.
+
+## Frequency filter
+
+Not every change is worth storing. Each recorded state gets a class:
+
+- **discrete** (switches, contacts, states with a list of values): every change
+- **continuous** (numbers): stored when the value changes by at least the dead band, at most once
+  per minimum interval (then the latest value), and small changes after the heartbeat
+- **aggregated** (energy, and numbers that change more than 6 times per minute on average of an
+  hour): 5 minute aggregates (min, max, mean, last)
+- **discarded**: other states that change more than 60 times per minute on average
+
+| Role | Dead band | Min. interval | Heartbeat |
+| --- | --- | --- | --- |
+| `value.temperature`, `level.temperature` | 0.2 | 60 s | 1 h |
+| `value.humidity` | 2 | 60 s | 1 h |
+| `value.brightness` | 10 % | 60 s | 1 h |
+| `level.dimmer`, `level.blind` | 1 | 0 s | none |
+| `value.power` | 5 % | 60 s | 15 min |
+| other numbers | 1 % | 60 s | 1 h |
+
+The tab "Rules" overrides these values per role. A state that suddenly changes more than 60 times
+per minute (a defective sensor) is throttled and reported in the log. The tab "High frequency"
+lists the measured rates. Per state, "Filter" in the object browser can force "every change" or
+"aggregate".
 
 ## Reading the data
 
@@ -84,6 +109,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 * (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
 * (bluefox) 5 minute aggregation for high-frequency values (energy)
 * (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like history, sql and influxdb
+* (bluefox) Frequency filter (dead band, minimum interval, heartbeat, throttling) and classification of high-frequency states by their measured rate
 
 ## License
 The MIT License (MIT)
