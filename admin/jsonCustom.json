@@ -1,0 +1,20 @@
+{
+    "i18n": true,
+    "type": "panel",
+    "items": {
+        "mode": {
+            "type": "select",
+            "label": "Recording",
+            "default": "always",
+            "options": [
+                { "value": "always", "label": "Always record" },
+                { "value": "exclude", "label": "Never record" }
+            ],
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        }
+    }
+}

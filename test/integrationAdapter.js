@@ -41,10 +41,14 @@ tests.integration(path.join(__dirname, '..'), {
                 await harness.changeAdapterConfig('recorder', {
                     native: { includePatterns: [TEST_ID], excludePatterns: [], flushInterval: 1, retentionDays: 7 },
                 });
+                const startedAt = Date.now();
                 await harness.startAdapterAndWait();
 
                 const count = await waitForState(harness, 'recorder.0.info.recordedCount', s => s?.val === 1);
                 assert.strictEqual(count?.val, 1, 'one state must be selected');
+                // the test directory survives between runs: today's events of earlier runs are counted too
+                const before = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.ts >= startedAt);
+                const baseline = before?.val || 0;
 
                 for (const val of [1, 2, 2, 3]) {
                     // the second 2 is an update without a change and must not be recorded
@@ -52,11 +56,25 @@ tests.integration(path.join(__dirname, '..'), {
                     await wait(50);
                 }
 
-                const events = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.val >= 3);
-                assert.strictEqual(events?.val, 3, 'three changes must be recorded');
+                const events = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.val >= baseline + 3);
+                assert.strictEqual(events?.val, baseline + 3, 'three changes must be recorded');
 
                 const size = await harness.states.getStateAsync('recorder.0.info.dbSize');
                 assert.ok(size?.val > 0, 'the database must exist');
+
+                const selection = await new Promise(resolve =>
+                    harness.sendTo('recorder.0', 'getSelection', null, resolve),
+                );
+                const entry = selection.find(s => s.id === TEST_ID);
+                assert.ok(entry, 'getSelection must list the test state');
+                assert.strictEqual(entry.reason, 'Include rule');
+
+                const preview = await new Promise(resolve =>
+                    harness.sendTo('recorder.0', 'previewSelection', { includePatterns: [] }, resolve),
+                );
+                assert.strictEqual(typeof preview.text, 'string');
+                assert.ok(preview.text.includes('<table'), 'the preview is an HTML table');
+                assert.ok(!preview.text.includes(TEST_ID), 'without the include rule the state is not selected');
             });
         });
     },

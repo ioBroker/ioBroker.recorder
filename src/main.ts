@@ -5,11 +5,20 @@
  */
 import * as utils from '@iobroker/adapter-core';
 
-import { Selection, definitionFromObject } from './lib/selection';
+import { Aggregator } from './lib/aggregator';
+import { categoryModes } from './lib/categories';
+import { estimateSize, renderPreview, summaryText } from './lib/preview';
+import {
+    computeSelection,
+    DeviceDetection,
+    type Candidate,
+    type SelectionConfig,
+    type SelectionResult,
+} from './lib/selection';
 import { classifySource } from './lib/source';
 import { DRIVER_NAME } from './lib/sqlite';
 import { Storage } from './lib/storage';
-import type { DpInfo, Keyframe, RecordedEvent, StoredValue } from './lib/types';
+import { DpClass, type DpInfo, type Keyframe, type RecordedEvent, type StoredValue } from './lib/types';
 import { encodeValue, sameValue } from './lib/values';
 
 const HOUR = 3_600_000;
@@ -24,11 +33,29 @@ const MAX_BUFFER = 200_000;
 /** Local time of the daily retention job */
 const RETENTION_HOUR = 3;
 const RETENTION_MINUTE = 30;
+/** Object changes are collected for this time, then the selection is computed again */
+const RESELECT_DELAY = 30_000;
+/** Object types the selection looks at */
+const SELECTION_TYPES = new Set<string>(['state', 'channel', 'device', 'folder', 'enum']);
 
 /** Last stored value of a datapoint, to detect real changes */
 interface CachedValue extends StoredValue {
     ack: boolean;
 }
+
+/** One entry of the answer to `getSelection` */
+interface SelectionInfo {
+    id: string;
+    name: string | null;
+    room: string | null;
+    func: string | null;
+    category: string | null;
+    devType: string | null;
+    cls: 'discrete' | 'continuous' | 'aggregated' | 'discarded';
+    reason: string;
+}
+
+const CLASS_NAMES: SelectionInfo['cls'][] = ['discrete', 'continuous', 'aggregated', 'discarded'];
 
 /** Milliseconds until the next local time `hour:minute` */
 function msUntilLocal(hour: number, minute: number, now: Date = new Date()): number {
@@ -47,12 +74,39 @@ function localMidnight(now: Date = new Date()): number {
     return midnight.getTime();
 }
 
+/** `chips` stores an array; older or hand-edited configurations may hold a string */
+function toPatternList(value: unknown): string[] {
+    if (Array.isArray(value)) {
+        return value.filter((v): v is string => typeof v === 'string');
+    }
+    if (typeof value === 'string') {
+        return value.split(/[,;\n]/);
+    }
+    return [];
+}
+
+function isSelectionObject(id: string, obj: ioBroker.Object | null | undefined): boolean {
+    if (!obj || !SELECTION_TYPES.has(obj.type)) {
+        return false;
+    }
+    return obj.type !== 'enum' || id.startsWith('enum.rooms.') || id.startsWith('enum.functions.');
+}
+
 class RecorderAdapter extends utils.Adapter {
     private storage: Storage | null = null;
+    /** Objects the selection is computed from (states, channels, devices, folders, rooms, functions) */
+    private objects: Record<string, ioBroker.Object> = {};
+    /** Results of the type detector, updated incrementally after object changes */
+    private detection: DeviceDetection | null = null;
+    /** Last result of the detection, used by the preview */
+    private detected: Map<string, Candidate> | null = null;
     /** Recorded datapoints by object ID */
     private readonly dps = new Map<string, DpInfo>();
+    /** Why each datapoint is recorded */
+    private readonly reasons = new Map<string, string>();
     /** Last stored value per `dp.id` */
     private readonly cache = new Map<number, CachedValue>();
+    private readonly aggregator = new Aggregator();
     /** Events not yet written */
     private buffer: RecordedEvent[] = [];
     private droppedEvents = 0;
@@ -61,17 +115,22 @@ class RecorderAdapter extends utils.Adapter {
     private lastEventsToday = -1;
     private retentionDays = 30;
     private lang: ioBroker.Languages = 'en';
+    private selectionRunning = false;
+    private selectionPending = false;
 
     private flushTimer: ioBroker.Interval | null | undefined = null;
     private keyframeTimer: ioBroker.Timeout | null | undefined = null;
     private retentionTimer: ioBroker.Timeout | null | undefined = null;
     private midnightTimer: ioBroker.Timeout | null | undefined = null;
+    private reselectTimer: ioBroker.Timeout | null | undefined = null;
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({ ...options, name: 'recorder' });
 
         this.on('ready', () => this.onReady());
         this.on('stateChange', (id, state) => this.onStateChange(id, state));
+        this.on('objectChange', (id, obj) => this.onObjectChange(id, obj));
+        this.on('message', obj => this.onMessage(obj));
         this.on('unload', callback => this.onUnload(callback));
     }
 
@@ -95,15 +154,15 @@ class RecorderAdapter extends utils.Adapter {
         }
         this.log.info(`Database in ${dataDir} (${DRIVER_NAME}), retention ${this.retentionDays} days`);
 
+        await this.loadObjects();
+        await this.subscribeForeignObjectsAsync('*');
         await this.updateSelection();
-        await this.readInitialValues();
         if (!this.storage) {
             // unloaded while starting
             return;
         }
 
-        const now = Date.now();
-        this.eventsToday = this.storage.countEvents(localMidnight(), now + 1);
+        this.eventsToday = this.storage.countEvents(localMidnight(), Date.now() + 1);
 
         // A keyframe right away: values may have changed while the adapter was not running
         this.flush(this.createKeyframe());
@@ -118,52 +177,121 @@ class RecorderAdapter extends utils.Adapter {
 
     // ---------------------------------------------------------------- selection
 
-    /**
-     * Determines the datapoints to record and adapts the subscriptions to the difference.
-     * Milestone 1: include and exclude patterns. The semantic selection (type detector, enums,
-     * roles) and the reaction to object changes follow in milestone 2.
-     */
+    /** Reads all objects the selection needs; afterward `onObjectChange` keeps them up to date */
+    private async loadObjects(): Promise<void> {
+        const objects: Record<string, ioBroker.Object> = {};
+        for (const type of ['state', 'channel', 'device', 'folder'] as const) {
+            Object.assign(objects, await this.getForeignObjectsAsync('*', type));
+        }
+        for (const pattern of ['enum.rooms.*', 'enum.functions.*']) {
+            Object.assign(objects, await this.getForeignObjectsAsync(pattern, 'enum'));
+        }
+        this.objects = objects;
+    }
+
+    private onObjectChange(id: string, obj: ioBroker.Object | null | undefined): void {
+        if (!this.storage || id.startsWith(`${this.namespace}.`)) {
+            return;
+        }
+        const old = this.objects[id];
+        if (!isSelectionObject(id, obj)) {
+            if (old) {
+                // deleted, or not of a relevant type anymore
+                delete this.objects[id];
+                this.detection?.invalidate(id);
+                this.scheduleReselect();
+            }
+            return;
+        }
+        this.objects[id] = obj!;
+        // many adapters rewrite their objects on every start without changing them
+        if (!old || old.type !== obj!.type || JSON.stringify(old.common) !== JSON.stringify(obj!.common)) {
+            this.detection?.invalidate(id);
+            this.scheduleReselect();
+        }
+    }
+
+    /** Collects object changes for 30 seconds, then computes the selection again */
+    private scheduleReselect(): void {
+        this.reselectTimer ||= this.setTimeout(() => {
+            this.reselectTimer = null;
+            void this.updateSelection();
+        }, RESELECT_DELAY);
+    }
+
+    private selectionConfig(override?: Partial<ioBroker.AdapterConfig>): SelectionConfig {
+        const config = { ...this.config, ...override };
+        return {
+            categories: categoryModes(config),
+            requireEnum: config.requireEnum === true || (config.requireEnum as unknown) === 'true',
+            includePatterns: toPatternList(config.includePatterns),
+            excludePatterns: toPatternList(config.excludePatterns),
+            ownNamespace: this.namespace,
+            lang: this.lang,
+        };
+    }
+
+    /** Computes the selection; a request while it runs is executed once afterward */
     private async updateSelection(): Promise<void> {
+        if (this.selectionRunning) {
+            this.selectionPending = true;
+            return;
+        }
+        this.selectionRunning = true;
+        try {
+            do {
+                this.selectionPending = false;
+                await this.applySelection();
+            } while (this.selectionPending && this.storage);
+        } catch (e) {
+            this.log.error(`Cannot compute the selection: ${(e as Error).message}`);
+        } finally {
+            this.selectionRunning = false;
+        }
+    }
+
+    /** Computes the selection and adapts subscriptions and master data to the difference */
+    private async applySelection(): Promise<void> {
         const storage = this.storage;
         if (!storage) {
             return;
         }
-        const selection = new Selection({
-            includePatterns: this.config.includePatterns,
-            excludePatterns: this.config.excludePatterns,
-            ownNamespace: this.namespace,
-        });
-
-        const selected = new Map<string, ioBroker.StateObject>();
-        for (const pattern of selection.includePatterns) {
-            const objects = await this.getForeignObjectsAsync(pattern, 'state');
-            for (const [id, obj] of Object.entries(objects)) {
-                if (selection.accepts(id, obj)) {
-                    selected.set(id, obj);
-                }
-            }
+        this.detection ||= new DeviceDetection(this.namespace);
+        const keys = Object.keys(this.objects).sort();
+        // the first detection takes seconds on large installations: give other adapters a chance
+        this.detected = await this.detection.update(
+            this.objects,
+            keys,
+            () => new Promise<void>(resolve => setImmediate(resolve)),
+        );
+        if (!this.storage) {
+            return;
         }
+        const result = computeSelection(this.objects, this.selectionConfig(), this.detected, keys);
 
         const now = Date.now();
         const activeIds = new Set<number>();
         const added: string[] = [];
         storage.batchMeta(() => {
-            for (const [id, obj] of selected) {
-                const dp = storage.upsertDp(definitionFromObject(id, obj, this.lang), now);
+            for (const [id, selected] of result.selected) {
+                const dp = storage.upsertDp(selected, now);
                 activeIds.add(dp.id);
                 if (!this.dps.has(id)) {
                     added.push(id);
                 }
                 this.dps.set(id, dp);
+                this.reasons.set(id, selected.reason);
             }
         });
-        const removed = [...this.dps.keys()].filter(id => !selected.has(id));
+        const removed = [...this.dps.keys()].filter(id => !result.selected.has(id));
         for (const id of removed) {
             const dp = this.dps.get(id);
             if (dp) {
                 this.cache.delete(dp.id);
+                this.aggregator.remove(dp.id);
             }
             this.dps.delete(id);
+            this.reasons.delete(id);
         }
         storage.deactivateAllExcept(activeIds);
 
@@ -172,27 +300,117 @@ class RecorderAdapter extends utils.Adapter {
         }
         if (added.length) {
             await this.subscribeForeignStatesAsync(added);
+            await this.readInitialValues(added);
         }
+
         if (!this.dps.size) {
-            this.log.warn('No states selected for recording. Add include patterns in the instance settings.');
+            this.log.warn('No states selected for recording. Check the categories and rules in the instance settings.');
         } else {
-            this.log.info(`Recording ${this.dps.size} states (${added.length} added, ${removed.length} removed)`);
+            const estimate = estimateSize([...result.selected.values()], new Map(), this.retentionDays);
+            this.log.info(
+                `Recording ${this.dps.size} states (${added.length} added, ${removed.length} removed, ` +
+                    `${result.examined} examined in ${result.durationMs} ms), ` +
+                    `estimated ${estimate.mbPerMonth} MB per month`,
+            );
         }
+        await this.setStateAsync('info.recordedCount', this.dps.size, true);
     }
 
-    /** Fills the value cache with the current values, so that the first keyframe is complete */
-    private async readInitialValues(): Promise<void> {
-        const ids = [...this.dps.keys()];
+    /** Fills the value cache with the current values, so that the next keyframe is complete */
+    private async readInitialValues(ids: string[]): Promise<void> {
         // in chunks, so that a single request does not get too large
         for (let i = 0; i < ids.length; i += 500) {
             const states = await this.getForeignStatesAsync(ids.slice(i, i + 500));
             for (const [id, state] of Object.entries(states)) {
                 const dp = this.dps.get(id);
-                if (dp && state) {
+                if (dp && state && !this.cache.has(dp.id)) {
                     this.cache.set(dp.id, { ...encodeValue(state.val, dp.type), ack: !!state.ack });
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------- messages
+
+    private onMessage(obj: ioBroker.Message): void {
+        if (!obj?.command) {
+            return;
+        }
+        const respond = (response: unknown): void => {
+            if (obj.callback) {
+                this.sendTo(obj.from, obj.command, response as ioBroker.MessagePayload, obj.callback);
+            }
+        };
+        switch (obj.command) {
+            case 'getSelection':
+                respond(this.getSelectionInfo());
+                break;
+
+            case 'previewSelection':
+                respond(this.previewSelection(obj.message as Partial<ioBroker.AdapterConfig> | undefined));
+                break;
+
+            case 'recalculate':
+                void this.updateSelection().then(() => respond({ result: `${this.dps.size} states` }));
+                break;
+
+            default:
+                respond({ error: `Unknown command: ${obj.command}` });
+        }
+    }
+
+    private getSelectionInfo(): SelectionInfo[] {
+        return [...this.dps.values()].map(dp => ({
+            id: dp.oid,
+            name: dp.name,
+            room: dp.room,
+            func: dp.func,
+            category: dp.category,
+            devType: dp.devType,
+            cls: CLASS_NAMES[dp.cls] || 'discrete',
+            reason: this.reasons.get(dp.oid) || '',
+        }));
+    }
+
+    /**
+     * Computes the selection for the configuration in the admin (not yet saved) without applying it.
+     * Answers in the format of the `textSendTo` control.
+     */
+    private previewSelection(override: Partial<ioBroker.AdapterConfig> | undefined): {
+        text: string;
+        count?: number;
+        mbPerMonth?: number;
+    } {
+        const storage = this.storage;
+        if (!storage || !this.detected) {
+            return { text: 'The instance is not ready yet' };
+        }
+        const retentionDays = RETENTION_DAYS.includes(Number(override?.retentionDays))
+            ? Number(override?.retentionDays)
+            : this.retentionDays;
+        const result: SelectionResult = computeSelection(
+            this.objects,
+            this.selectionConfig(override && typeof override === 'object' ? override : undefined),
+            // the detection of the last selection run; object changes since then follow within 30 s
+            this.detected,
+        );
+
+        // measured rates of the last 24 hours
+        const now = Date.now();
+        const changesPerDay = new Map<string, number>();
+        for (const [id, count] of storage.countEventsPerDp(now - DAY, now)) {
+            const dp = storage.getDpById(id);
+            if (dp) {
+                changesPerDay.set(dp.oid, count);
+            }
+        }
+        const estimate = estimateSize([...result.selected.values()], changesPerDay, retentionDays);
+        this.log.debug(`Preview: ${summaryText(estimate, retentionDays, 'en')}`);
+        return {
+            text: renderPreview(result, estimate, retentionDays, this.lang),
+            count: estimate.count,
+            mbPerMonth: estimate.mbPerMonth,
+        };
     }
 
     // ---------------------------------------------------------------- recording
@@ -203,16 +421,25 @@ class RecorderAdapter extends utils.Adapter {
         if (!storage || !dp || !state) {
             return;
         }
+        const now = Date.now();
+        const ts = state.ts || now;
+        if (ts < now - this.retentionDays * DAY) {
+            // an adapter set a timestamp from the past, older than anything we keep
+            return;
+        }
         const stored = encodeValue(state.val, dp.type);
         const ack = !!state.ack;
+
+        if (dp.cls === DpClass.Aggregated && stored.val !== null) {
+            // every sample counts for the mean, also unchanged ones
+            this.aggregator.add(dp.id, ts, stored.val);
+            this.cache.set(dp.id, { ...stored, ack });
+            return;
+        }
+
         const previous = this.cache.get(dp.id);
         if (previous && previous.ack === ack && sameValue(previous, stored)) {
             // only the timestamp was updated
-            return;
-        }
-        const ts = state.ts || Date.now();
-        if (ts < Date.now() - this.retentionDays * DAY) {
-            // an adapter set a timestamp from the past, older than anything we keep
             return;
         }
         this.cache.set(dp.id, { ...stored, ack });
@@ -243,19 +470,29 @@ class RecorderAdapter extends utils.Adapter {
         return { ts: Date.now(), rows };
     }
 
-    /** Writes the buffer (and a keyframe) in one transaction */
-    private flush(keyframe?: Keyframe, updateStates = true): void {
+    /**
+     * Writes the buffer, the finished 5 minute aggregates and a keyframe in one transaction.
+     *
+     * @param keyframe keyframe to write with this batch
+     * @param final on unload: also write the running aggregates and do not update states
+     */
+    private flush(keyframe?: Keyframe, final = false): void {
         const storage = this.storage;
-        if (!storage || (!this.buffer.length && !keyframe?.rows.length)) {
+        if (!storage) {
+            return;
+        }
+        const aggregates = final ? this.aggregator.takeAll() : this.aggregator.takeClosed(Date.now());
+        if (!this.buffer.length && !aggregates.length && !keyframe?.rows.length) {
             return;
         }
         const events = this.buffer;
         this.buffer = [];
         try {
-            storage.write(events, keyframe);
+            storage.write(events, keyframe, aggregates);
         } catch (e) {
             this.log.error(`Cannot write ${events.length} events: ${(e as Error).message}`);
             // keep them for the next attempt, but do not grow without limit
+            this.aggregator.restore(aggregates);
             this.buffer = events.concat(this.buffer);
             if (this.buffer.length > MAX_BUFFER) {
                 const drop = this.buffer.length - MAX_BUFFER;
@@ -265,7 +502,7 @@ class RecorderAdapter extends utils.Adapter {
             }
             return;
         }
-        if (updateStates) {
+        if (!final) {
             void this.updateInfoStates();
         }
     }
@@ -283,9 +520,6 @@ class RecorderAdapter extends utils.Adapter {
         if (force || this.eventsToday !== this.lastEventsToday) {
             this.lastEventsToday = this.eventsToday;
             await this.setStateAsync('info.eventsToday', this.eventsToday, true);
-        }
-        if (force) {
-            await this.setStateAsync('info.recordedCount', this.dps.size, true);
         }
     }
 
@@ -349,7 +583,7 @@ class RecorderAdapter extends utils.Adapter {
 
     private onUnload(callback: () => void): void {
         try {
-            for (const timer of [this.keyframeTimer, this.retentionTimer, this.midnightTimer]) {
+            for (const timer of [this.keyframeTimer, this.retentionTimer, this.midnightTimer, this.reselectTimer]) {
                 if (timer) {
                     this.clearTimeout(timer);
                 }
@@ -361,9 +595,10 @@ class RecorderAdapter extends utils.Adapter {
             this.keyframeTimer = null;
             this.retentionTimer = null;
             this.midnightTimer = null;
+            this.reselectTimer = null;
 
             // node:sqlite is synchronous: the buffer is on disk before the callback is called
-            this.flush(undefined, false);
+            this.flush(undefined, true);
             this.storage?.close();
             this.storage = null;
         } catch (e) {

@@ -15,8 +15,8 @@ The implementation plan (German) is the Claude Doc "ioBroker.recorder: Umsetzung
 | Milestone | Content | Status |
 | --- | --- | --- |
 | M1 | scaffold, SQLite storage, batched writing, keyframes, retention | done |
-| M2 | selection engine (type detector, enums, roles, include/exclude, custom exclusions) | open |
-| M3 | frequency filter (dead band, min interval, heartbeat, aggregation), `getHistory` | open |
+| M2 | selection engine (type detector, enums, roles, include/exclude, custom exclusions) | done |
+| M3 | frequency filter (dead band, min interval, heartbeat), `getHistory` (5 min aggregation is done) | open |
 | M4 | walk into the past: `getSnapshot`, `getEvents`, replay, admin tab (React) | open |
 | M5 | presence simulation | open |
 | M6 | anomaly detection | open |
@@ -46,13 +46,16 @@ yet because the admin is pure JsonConfig; it is added with the React admin tab i
 
 | Path | Content |
 | --- | --- |
-| `src/main.ts` | `RecorderAdapter`: selection, subscriptions, value cache, buffer, timers |
+| `src/main.ts` | `RecorderAdapter`: object cache, selection runs, subscriptions, value cache, buffer, timers, `onMessage` |
+| `src/lib/selection.ts` | `computeSelection()` (pure, the four levels) and `DeviceDetection` (cached type detector) |
+| `src/lib/categories.ts` | the 10 categories: detector types, recorded state names, fallback roles, negative roles |
+| `src/lib/aggregator.ts` | 5 minute aggregates (min, max, mean of samples, last) for class "aggregated" |
+| `src/lib/preview.ts` | size estimate and the HTML table of the admin tab "Preview" |
 | `src/lib/storage.ts` | `Storage`: meta.sqlite + one file per week, upsert of datapoints, sources, batch write, retention |
 | `src/lib/schema.ts` | SQL schemas, versioned with `PRAGMA user_version` |
 | `src/lib/sqlite.ts` | driver abstraction over `node:sqlite` (suppresses its ExperimentalWarning) |
 | `src/lib/week.ts` | ISO weeks in UTC, week file names |
 | `src/lib/values.ts` | encoding of state values into `val` (REAL) / `sval` (TEXT) |
-| `src/lib/selection.ts` | which states are recorded; master data from the object |
 | `src/lib/source.ts` | classification of `state.from` into user / script / adapter / system |
 | `src/lib/types.ts` | shared types and enums |
 | `src/lib/adapter-config.d.ts` | `ioBroker.AdapterConfig`, keep in sync with `native` and `admin/jsonConfig.json` |
@@ -71,10 +74,46 @@ yet because the admin is pure JsonConfig; it is added with the React admin tab i
   synchronous (node:sqlite), so `onUnload` can flush before calling the callback.
 - Master data changes for a whole selection run in one transaction (`Storage.batchMeta`).
 
+### Selection
+
+`computeSelection()` evaluates four levels; a later one overrides an earlier one:
+
+1. **Type detector** (`@iobroker/type-detector`): every channel, every device with direct states and
+   every stand-alone state with a meaningful role is examined. Only the state names listed per
+   category in `categories.ts` are taken (no indicators, battery, RSSI, buttons). `ELECTRIC_POWER`
+   and `CONSUMPTION` of any device go to the category "energy".
+2. **Enums**: with `requireEnum` only states that are in a room or function themselves or by their
+   channel or device. Room and function names are always stored in `dp.room` / `dp.func`.
+3. **Roles**: fallback roles per category for states without a detected device; the negative roles
+   (`info.*`, `indicator.connected/reachable`, `button*`, `text`, `json`, `url`) drop any candidate.
+   Then the category modes (`catLight` ... `catEnergy`: off / on / aggregated) apply.
+4. **Manual**: include patterns, exclude patterns (wins over include), then
+   `common.custom[recorder.0]` with `mode: 'always' | 'exclude'` (wins over everything). The plan
+   said `enabled = false`, but the admin deletes the custom settings when they are disabled.
+
+`system.*` and the own namespace are never selected automatically. An alias and its target carry
+the same values: the alias is kept, the target dropped (unless included manually).
+
+The type detector is the expensive part (~1 s for 40,000 states on a desktop CPU). `DeviceDetection`
+keeps its results per examined object; `onObjectChange` invalidates the object, its channel, its
+device and, for channels/devices, their direct children. The first full run yields to the event
+loop every 200 detections. **The detector caches results per instance: always use a new
+`ChannelDetector` per run.** Object changes are collected for 30 s (`RESELECT_DELAY`).
+
+### Messages (`sendTo`)
+
+| Command | Message | Answer |
+| --- | --- | --- |
+| `getSelection` | - | `[{ id, name, room, func, category, devType, cls, reason }]` |
+| `previewSelection` | (unsaved) native config | `{ text: html, count, mbPerMonth }` for `textSendTo` with `container: html` |
+| `recalculate` | - | `{ result }` after a selection run |
+
 ### Recording path
 
 1. `onStateChange` encodes the value and compares it with the value cache. Only real changes of
-   value **or ack** are recorded; timestamp-only updates are dropped.
+   value **or ack** are recorded; timestamp-only updates are dropped. Numbers of class
+   "aggregated" go to the `Aggregator` instead (every sample, also unchanged ones); finished
+   intervals are written with the next flush into `agg5`, running ones on unload.
 2. Events go into `buffer`; the flush timer (`flushInterval`, default 30 s) writes them in one
    transaction per week file. A buffer of `MAX_BATCH` events is written immediately.
 3. If writing fails, the events stay in the buffer (at most `MAX_BUFFER`, older ones are dropped

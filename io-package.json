@@ -67,8 +67,10 @@
     "compact": true,
     "nogit": true,
     "messagebox": true,
+    "supportCustoms": true,
     "adminUI": {
-      "config": "json"
+      "config": "json",
+      "custom": "json"
     },
     "type": "storage",
     "connectionType": "local",
@@ -88,6 +90,17 @@
   "native": {
     "retentionDays": 30,
     "flushInterval": 30,
+    "requireEnum": false,
+    "catLight": "on",
+    "catShading": "on",
+    "catClimate": "on",
+    "catWindows": "on",
+    "catMotion": "off",
+    "catSecurity": "on",
+    "catSockets": "on",
+    "catMedia": "on",
+    "catWeather": "on",
+    "catEnergy": "aggregated",
     "includePatterns": [],
     "excludePatterns": []
   },

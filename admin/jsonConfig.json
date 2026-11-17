@@ -16,6 +16,181 @@
                     "lg": 12,
                     "xl": 12
                 },
+                "_categoriesHeader": {
+                    "type": "header",
+                    "text": "Categories",
+                    "size": 4,
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "catLight": {
+                    "type": "select",
+                    "label": "Light",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catShading": {
+                    "type": "select",
+                    "label": "Shading",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catClimate": {
+                    "type": "select",
+                    "label": "Heating and climate",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catWindows": {
+                    "type": "select",
+                    "label": "Windows and doors",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catMotion": {
+                    "type": "select",
+                    "label": "Motion and presence",
+                    "help": "Motion and presence data show when somebody is at home. Off by default.",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catSecurity": {
+                    "type": "select",
+                    "label": "Security",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catSockets": {
+                    "type": "select",
+                    "label": "Switches and sockets",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catMedia": {
+                    "type": "select",
+                    "label": "Media",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catWeather": {
+                    "type": "select",
+                    "label": "Weather",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "catEnergy": {
+                    "type": "select",
+                    "label": "Energy",
+                    "options": [
+                        { "value": "off", "label": "Off" },
+                        { "value": "on", "label": "Record" },
+                        { "value": "aggregated", "label": "Aggregate (5 min)" }
+                    ],
+                    "xs": 12,
+                    "sm": 6,
+                    "md": 4,
+                    "lg": 3,
+                    "xl": 3
+                },
+                "requireEnum": {
+                    "type": "checkbox",
+                    "label": "Only states in a room or function",
+                    "help": "Automatically selected states must belong to a room or function (directly or by their channel or device). Include rules and per-state settings are not affected.",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "_storageHeader": {
+                    "type": "header",
+                    "text": "Storage",
+                    "size": 4,
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
                 "retentionDays": {
                     "type": "select",
                     "label": "Keep raw data",
@@ -54,7 +229,7 @@
             "items": {
                 "_rulesInfo": {
                     "type": "staticText",
-                    "text": "Patterns with * as wildcard, e.g. zigbee.0.*.state or hm-rpc.0.*.LEVEL. The automatic selection of states follows in a later version; until then only included states are recorded.",
+                    "text": "Patterns with * as wildcard, e.g. zigbee.0.*.state. Include rules add states to the automatic selection, exclude rules remove them. Single states can also be set in the object browser (custom settings).",
                     "xs": 12,
                     "sm": 12,
                     "md": 12,
@@ -81,6 +256,63 @@
                     "md": 12,
                     "lg": 6,
                     "xl": 6
+                },
+                "_recalculate": {
+                    "type": "sendTo",
+                    "label": "Recalculate selection",
+                    "command": "recalculate",
+                    "icon": "refresh",
+                    "variant": "outlined",
+                    "showProcess": true,
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 6,
+                    "lg": 4,
+                    "xl": 4
+                }
+            }
+        },
+        "_preview": {
+            "type": "panel",
+            "label": "Preview",
+            "items": {
+                "_previewInfo": {
+                    "type": "staticText",
+                    "text": "The preview shows which states would be recorded with the settings above, also before saving. The instance must be running.",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "_previewTable": {
+                    "type": "textSendTo",
+                    "container": "html",
+                    "command": "previewSelection",
+                    "jsonData": "{\"retentionDays\": ${Number(data.retentionDays) || 30}, \"requireEnum\": ${!!data.requireEnum}, \"catLight\": \"${data.catLight}\", \"catShading\": \"${data.catShading}\", \"catClimate\": \"${data.catClimate}\", \"catWindows\": \"${data.catWindows}\", \"catMotion\": \"${data.catMotion}\", \"catSecurity\": \"${data.catSecurity}\", \"catSockets\": \"${data.catSockets}\", \"catMedia\": \"${data.catMedia}\", \"catWeather\": \"${data.catWeather}\", \"catEnergy\": \"${data.catEnergy}\", \"includePatterns\": ${JSON.stringify(data.includePatterns || [])}, \"excludePatterns\": ${JSON.stringify(data.excludePatterns || [])}}",
+                    "alsoDependsOn": [
+                        "retentionDays",
+                        "requireEnum",
+                        "catLight",
+                        "catShading",
+                        "catClimate",
+                        "catWindows",
+                        "catMotion",
+                        "catSecurity",
+                        "catSockets",
+                        "catMedia",
+                        "catWeather",
+                        "catEnergy",
+                        "includePatterns",
+                        "excludePatterns"
+                    ],
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         }

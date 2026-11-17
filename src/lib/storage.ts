@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
+import type { AggregateRow } from './aggregator';
 import { initEventsSchema, initMetaSchema } from './schema';
 import {
     openDatabase,
@@ -33,6 +34,15 @@ interface WeekDb {
     db: SqliteDatabase;
     insertEvent: SqliteStatement;
     insertKeyframe: SqliteStatement;
+    insertAggregate: SqliteStatement;
+}
+
+/** The rows of one write that belong to one week file */
+interface WeekGroup {
+    ts: number;
+    events: RecordedEvent[];
+    aggregates: AggregateRow[];
+    keyframe?: Keyframe;
 }
 
 interface MetaStatements {
@@ -249,6 +259,10 @@ export class Storage {
                 db,
                 insertEvent: db.prepare('INSERT INTO ev (ts, dp, val, sval, ack, src) VALUES (?, ?, ?, ?, ?, ?)'),
                 insertKeyframe: db.prepare('INSERT OR REPLACE INTO keyframe (ts, dp, val, sval) VALUES (?, ?, ?, ?)'),
+                // OR REPLACE: an interval written partially on unload is completed after a restart
+                insertAggregate: db.prepare(
+                    'INSERT OR REPLACE INTO agg5 (ts, dp, min, max, avg, last) VALUES (?, ?, ?, ?, ?, ?)',
+                ),
             };
             this.weeks.set(key, week);
         }
@@ -267,28 +281,28 @@ export class Storage {
     }
 
     /**
-     * Writes a batch of events and optionally a keyframe: one transaction per affected week file
-     * (normally exactly one).
+     * Writes a batch of events, 5 minute aggregates and optionally a keyframe: one transaction per
+     * affected week file (normally exactly one).
      */
-    public write(events: RecordedEvent[], keyframe?: Keyframe): void {
-        const byWeek = new Map<string, { ts: number; events: RecordedEvent[]; keyframe?: Keyframe }>();
-        for (const event of events) {
-            const key = weekKey(event.ts);
+    public write(events: RecordedEvent[], keyframe?: Keyframe, aggregates: AggregateRow[] = []): void {
+        const byWeek = new Map<string, WeekGroup>();
+        const groupOf = (ts: number): WeekGroup => {
+            const key = weekKey(ts);
             let group = byWeek.get(key);
             if (!group) {
-                group = { ts: event.ts, events: [] };
+                group = { ts, events: [], aggregates: [] };
                 byWeek.set(key, group);
             }
-            group.events.push(event);
+            return group;
+        };
+        for (const event of events) {
+            groupOf(event.ts).events.push(event);
+        }
+        for (const row of aggregates) {
+            groupOf(row.ts).aggregates.push(row);
         }
         if (keyframe?.rows.length) {
-            const key = weekKey(keyframe.ts);
-            let group = byWeek.get(key);
-            if (!group) {
-                group = { ts: keyframe.ts, events: [] };
-                byWeek.set(key, group);
-            }
-            group.keyframe = keyframe;
+            groupOf(keyframe.ts).keyframe = keyframe;
         }
 
         for (const group of byWeek.values()) {
@@ -296,6 +310,9 @@ export class Storage {
             transaction(week.db, () => {
                 for (const e of group.events) {
                     week.insertEvent.run(e.ts, e.dp, e.val, e.sval, e.ack ? 1 : 0, e.src);
+                }
+                for (const a of group.aggregates) {
+                    week.insertAggregate.run(a.ts, a.dp, a.min, a.max, a.avg, a.last);
                 }
                 if (group.keyframe) {
                     const ts = group.keyframe.ts;
@@ -357,6 +374,20 @@ export class Storage {
                 toNumber(db.prepare('SELECT COUNT(*) AS n FROM ev WHERE ts >= ? AND ts < ?').get(from, to)?.n) ?? 0;
         });
         return count;
+    }
+
+    /** Number of events per `dp.id` in `[from, to)` */
+    public countEventsPerDp(from: number, to: number): Map<number, number> {
+        const counts = new Map<number, number>();
+        this.forEachWeek(from, to, db => {
+            for (const row of db
+                .prepare('SELECT dp, COUNT(*) AS n FROM ev WHERE ts >= ? AND ts < ? GROUP BY dp')
+                .all(from, to)) {
+                const dp = toNumber(row.dp) ?? 0;
+                counts.set(dp, (counts.get(dp) || 0) + (toNumber(row.n) ?? 0));
+            }
+        });
+        return counts;
     }
 
     /**

@@ -14,8 +14,26 @@ a month) - without configuring every single state - and builds three features on
 
 The model is the recorder of Home Assistant.
 
-> **Status:** early development (milestone 1: storage). Only states matched by the include patterns
-> are recorded so far; the automatic selection follows.
+> **Status:** early development (milestone 2 of 6: automatic selection). Replay, presence
+> simulation and anomaly detection follow.
+
+## Selection of the states
+
+The states are selected automatically in four steps; a later one overrides an earlier one:
+
+1. The type detector recognizes devices (light, blind, thermostat, window ...) and the meaning of
+   their states. Only meaningful states are taken: no battery, signal strength or reachability.
+2. Optionally only states in a room or function.
+3. For states without a recognized device the role decides (e.g. `value.temperature`).
+4. Include and exclude patterns, and per state "always record" / "never record" in the object
+   browser (custom settings).
+
+The categories light, shading, heating and climate, windows and doors, security, switches and
+sockets, media, weather and energy can each be switched off, recorded or aggregated to 5 minute
+values. Motion and presence are **off** by default for privacy; energy is aggregated by default.
+
+The tab "Preview" in the instance settings shows which states would be recorded, with the reason
+and a size estimate, before the settings are saved.
 
 ## How it differs from history, sql and influxdb
 
@@ -48,6 +66,8 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 ## Changelog
 ### **WORK IN PROGRESS**
 * (bluefox) Initial version: storage layer, batched writing, keyframes, retention
+* (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
+* (bluefox) 5 minute aggregation for high-frequency values (energy)
 
 ## License
 The MIT License (MIT)
