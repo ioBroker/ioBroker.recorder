@@ -1,0 +1,63 @@
+'use strict';
+
+const path = require('node:path');
+const assert = require('node:assert');
+const { tests } = require('@iobroker/testing');
+
+const TEST_ID = '0_userdata.0.recorderTest';
+
+function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Polls a state until `check(state)` is true or the timeout expires */
+async function waitForState(harness, id, check, timeout = 10_000) {
+    const end = Date.now() + timeout;
+    let state;
+    while (Date.now() < end) {
+        state = await harness.states.getStateAsync(id);
+        if (check(state)) {
+            return state;
+        }
+        await wait(200);
+    }
+    return state;
+}
+
+// Run tests
+tests.integration(path.join(__dirname, '..'), {
+    defineAdditionalTests({ suite }) {
+        suite('Recording', getHarness => {
+            it('records real changes and ignores timestamp-only updates', async function () {
+                this.timeout(30_000);
+                const harness = getHarness();
+
+                await harness.objects.setObjectAsync(TEST_ID, {
+                    type: 'state',
+                    common: { name: 'Recorder test', type: 'number', role: 'value', read: true, write: true },
+                    native: {},
+                });
+                await harness.states.setStateAsync(TEST_ID, { val: 0, ack: true });
+                await harness.changeAdapterConfig('recorder', {
+                    native: { includePatterns: [TEST_ID], excludePatterns: [], flushInterval: 1, retentionDays: 7 },
+                });
+                await harness.startAdapterAndWait();
+
+                const count = await waitForState(harness, 'recorder.0.info.recordedCount', s => s?.val === 1);
+                assert.strictEqual(count?.val, 1, 'one state must be selected');
+
+                for (const val of [1, 2, 2, 3]) {
+                    // the second 2 is an update without a change and must not be recorded
+                    await harness.states.setStateAsync(TEST_ID, { val, ack: true });
+                    await wait(50);
+                }
+
+                const events = await waitForState(harness, 'recorder.0.info.eventsToday', s => s?.val >= 3);
+                assert.strictEqual(events?.val, 3, 'three changes must be recorded');
+
+                const size = await harness.states.getStateAsync('recorder.0.info.dbSize');
+                assert.ok(size?.val > 0, 'the database must exist');
+            });
+        });
+    },
+});

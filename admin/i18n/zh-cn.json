@@ -1,0 +1,17 @@
+{
+    "Recording": "记录",
+    "Keep raw data": "保留原始数据",
+    "Events and keyframes older than this are deleted daily at 03:30": "早于此期限的事件和关键帧将在每天 03:30 删除",
+    "1 day": "1 天",
+    "7 days": "7 天",
+    "30 days": "30 天",
+    "90 days": "90 天",
+    "Write interval": "写入间隔",
+    "Changes are collected in memory and written in one transaction. Longer intervals spare SD cards.": "更改先在内存中收集，再在一个事务中写入。较长的间隔可保护 SD 卡。",
+    "sec": "秒",
+    "Rules": "规则",
+    "Patterns with * as wildcard, e.g. zigbee.0.*.state or hm-rpc.0.*.LEVEL. The automatic selection of states follows in a later version; until then only included states are recorded.": "使用 * 作为通配符的模式，例如 zigbee.0.*.state 或 hm-rpc.0.*.LEVEL。状态的自动选择将在后续版本中提供；在此之前只记录包含的状态。",
+    "Include": "包含",
+    "Exclude": "排除",
+    "Excluded states are never recorded, even if they match an include pattern": "被排除的状态永远不会被记录，即使它们匹配包含模式"
+}

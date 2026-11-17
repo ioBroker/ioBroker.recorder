@@ -1,0 +1,145 @@
+{
+  "common": {
+    "name": "recorder",
+    "version": "0.0.1",
+    "news": {
+      "0.0.1": {
+        "en": "initial release",
+        "de": "Erstveröffentlichung",
+        "ru": "первоначальный выпуск",
+        "pt": "lançamento inicial",
+        "nl": "eerste release",
+        "fr": "version initiale",
+        "it": "rilascio iniziale",
+        "es": "lanzamiento inicial",
+        "pl": "pierwsze wydanie",
+        "uk": "початковий випуск",
+        "zh-cn": "首次发布"
+      }
+    },
+    "titleLang": {
+      "en": "Recorder",
+      "de": "Recorder",
+      "ru": "Рекордер",
+      "pt": "Gravador",
+      "nl": "Recorder",
+      "fr": "Enregistreur",
+      "it": "Registratore",
+      "es": "Grabador",
+      "pl": "Rejestrator",
+      "uk": "Рекордер",
+      "zh-cn": "记录器"
+    },
+    "desc": {
+      "en": "Records all relevant states without per-state configuration: time travel, presence simulation and anomaly detection",
+      "de": "Zeichnet alle relevanten Datenpunkte ohne Einzelkonfiguration auf: Zeitreise, Anwesenheitssimulation und Anomalieerkennung",
+      "ru": "Записывает все важные состояния без настройки каждого из них: путешествие во времени, имитация присутствия и обнаружение аномалий",
+      "pt": "Grava todos os estados relevantes sem configuração individual: viagem no tempo, simulação de presença e deteção de anomalias",
+      "nl": "Registreert alle relevante datapunten zonder configuratie per datapunt: tijdreizen, aanwezigheidssimulatie en anomaliedetectie",
+      "fr": "Enregistre tous les états pertinents sans configuration individuelle : voyage dans le temps, simulation de présence et détection d'anomalies",
+      "it": "Registra tutti gli stati rilevanti senza configurazione individuale: viaggio nel tempo, simulazione di presenza e rilevamento di anomalie",
+      "es": "Registra todos los estados relevantes sin configuración individual: viaje en el tiempo, simulación de presencia y detección de anomalías",
+      "pl": "Rejestruje wszystkie istotne stany bez konfiguracji pojedynczych punktów: podróż w czasie, symulacja obecności i wykrywanie anomalii",
+      "uk": "Записує всі важливі стани без налаштування кожного з них: подорож у часі, імітація присутності та виявлення аномалій",
+      "zh-cn": "无需逐个配置即可记录所有相关状态：时间回溯、在家模拟和异常检测"
+    },
+    "authors": [
+      "bluefox <dogafox@gmail.com>"
+    ],
+    "licenseInformation": {
+      "license": "MIT",
+      "type": "free"
+    },
+    "platform": "Javascript/Node.js",
+    "mode": "daemon",
+    "icon": "recorder.svg",
+    "extIcon": "https://raw.githubusercontent.com/ioBroker/ioBroker.recorder/main/admin/recorder.svg",
+    "readme": "https://github.com/ioBroker/ioBroker.recorder/blob/main/README.md",
+    "keywords": [
+      "recorder",
+      "history",
+      "time machine",
+      "presence simulation",
+      "anomaly detection"
+    ],
+    "loglevel": "info",
+    "enabled": true,
+    "compact": true,
+    "nogit": true,
+    "messagebox": true,
+    "adminUI": {
+      "config": "json"
+    },
+    "type": "storage",
+    "connectionType": "local",
+    "dataSource": "push",
+    "tier": 2,
+    "dependencies": [
+      {
+        "js-controller": ">=6.0.11"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=7.0.0"
+      }
+    ]
+  },
+  "native": {
+    "retentionDays": 30,
+    "flushInterval": 30,
+    "includePatterns": [],
+    "excludePatterns": []
+  },
+  "objects": [],
+  "instanceObjects": [
+    {
+      "_id": "info",
+      "type": "channel",
+      "common": {
+        "name": "Information"
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.recordedCount",
+      "type": "state",
+      "common": {
+        "role": "value",
+        "name": "Number of recorded states",
+        "type": "number",
+        "read": true,
+        "write": false,
+        "def": 0
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.dbSize",
+      "type": "state",
+      "common": {
+        "role": "value",
+        "name": "Size of all database files",
+        "type": "number",
+        "unit": "MB",
+        "read": true,
+        "write": false,
+        "def": 0
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.eventsToday",
+      "type": "state",
+      "common": {
+        "role": "value",
+        "name": "Events recorded since midnight",
+        "type": "number",
+        "read": true,
+        "write": false,
+        "def": 0
+      },
+      "native": {}
+    }
+  ]
+}

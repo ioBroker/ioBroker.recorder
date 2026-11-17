@@ -1,0 +1,17 @@
+{
+    "Recording": "Gravação",
+    "Keep raw data": "Manter dados brutos",
+    "Events and keyframes older than this are deleted daily at 03:30": "Eventos e keyframes mais antigos são eliminados diariamente às 03:30",
+    "1 day": "1 dia",
+    "7 days": "7 dias",
+    "30 days": "30 dias",
+    "90 days": "90 dias",
+    "Write interval": "Intervalo de escrita",
+    "Changes are collected in memory and written in one transaction. Longer intervals spare SD cards.": "As alterações são recolhidas na memória e escritas numa única transação. Intervalos mais longos poupam cartões SD.",
+    "sec": "seg",
+    "Rules": "Regras",
+    "Patterns with * as wildcard, e.g. zigbee.0.*.state or hm-rpc.0.*.LEVEL. The automatic selection of states follows in a later version; until then only included states are recorded.": "Padrões com * como curinga, p. ex. zigbee.0.*.state ou hm-rpc.0.*.LEVEL. A seleção automática de estados virá numa versão posterior; até lá só são gravados os estados incluídos.",
+    "Include": "Incluir",
+    "Exclude": "Excluir",
+    "Excluded states are never recorded, even if they match an include pattern": "Estados excluídos nunca são gravados, mesmo que correspondam a um padrão de inclusão"
+}

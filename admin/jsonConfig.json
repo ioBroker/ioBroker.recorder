@@ -1,0 +1,88 @@
+{
+    "i18n": true,
+    "type": "tabs",
+    "items": {
+        "_recording": {
+            "type": "panel",
+            "label": "Recording",
+            "items": {
+                "_logo": {
+                    "type": "staticImage",
+                    "src": "recorder.svg",
+                    "style": { "width": 64, "height": 64 },
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "retentionDays": {
+                    "type": "select",
+                    "label": "Keep raw data",
+                    "help": "Events and keyframes older than this are deleted daily at 03:30",
+                    "options": [
+                        { "value": 1, "label": "1 day" },
+                        { "value": 7, "label": "7 days" },
+                        { "value": 30, "label": "30 days" },
+                        { "value": 90, "label": "90 days" }
+                    ],
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 6,
+                    "lg": 4,
+                    "xl": 4
+                },
+                "flushInterval": {
+                    "type": "number",
+                    "label": "Write interval",
+                    "help": "Changes are collected in memory and written in one transaction. Longer intervals spare SD cards.",
+                    "unit": "sec",
+                    "min": 1,
+                    "max": 600,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 6,
+                    "lg": 4,
+                    "xl": 4
+                }
+            }
+        },
+        "_rules": {
+            "type": "panel",
+            "label": "Rules",
+            "items": {
+                "_rulesInfo": {
+                    "type": "staticText",
+                    "text": "Patterns with * as wildcard, e.g. zigbee.0.*.state or hm-rpc.0.*.LEVEL. The automatic selection of states follows in a later version; until then only included states are recorded.",
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "includePatterns": {
+                    "type": "chips",
+                    "label": "Include",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "excludePatterns": {
+                    "type": "chips",
+                    "label": "Exclude",
+                    "help": "Excluded states are never recorded, even if they match an include pattern",
+                    "newLine": true,
+                    "xs": 12,
+                    "sm": 12,
+                    "md": 12,
+                    "lg": 6,
+                    "xl": 6
+                }
+            }
+        }
+    }
+}
