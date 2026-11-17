@@ -139,7 +139,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 * (bluefox) Initial version: storage layer, batched writing, keyframes, retention
 * (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
 * (bluefox) 5 minute aggregation for high-frequency values (energy)
-* (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like history, sql and influxdb
+* (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like history, sql and influxdb; `common.getHistory`, so that admin and echarts offer the instance
 * (bluefox) Frequency filter (dead band, minimum interval, heartbeat, throttling) and classification of high-frequency states by their measured rate
 * (bluefox) Walk into the past: `getSnapshot`, `getEvents`, `getTimeline`, replay with mirror states and the admin tab "Time machine"
 

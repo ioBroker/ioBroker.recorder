@@ -143,9 +143,13 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
 
 - The value before `start` is the last event or, if later, the hourly keyframe: a value that did
   not change for weeks is found in the week file of `start`. The value after `end` is the next event.
+  If nothing is known before `start` (the recording started within the range), the first keyframe
+  in the range before the first change counts: it holds the values at the start of the recording.
 - The buffer and the running 5 minute intervals are included (nothing waits for the flush).
 - Class "aggregated" has no single values: each 5 minute interval gives one entry in its middle
-  (`min`/`max` for those methods, both for `minmax`, the mean otherwise).
+  (`min`/`max` for those methods, both for `minmax`, the mean otherwise). Intervals exist only
+  where samples came in, so the value before `start` is the keyframe if it is newer than the last
+  interval: a value that seldom changes (a forecast) would otherwise give an empty answer.
 - Strings and JSON fall back from a numeric method to `onchange`; booleans are 0/1 for the
   aggregation and `true`/`false` for `none`/`onchange`.
 - `from: true` also returns `user`; `q` is not stored.
@@ -153,8 +157,10 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
 
 `common.getHistory: true` in `io-package.json` is required: admin (chart in the object dialog,
 "default history" in the system settings) and the echarts editor list only instances with this
-flag. Both also list only states with an entry in `common.custom[recorder.0]`, so automatically
-selected states are not shown there (charts that name `recorder.0` explicitly work).
+flag. Admin lists only states with an entry in `common.custom[recorder.0]`, so automatically
+selected states are not shown there (charts that name `recorder.0` explicitly work). The echarts
+editor asks every running history instance for `getEnabledDPs` (echarts newer than 6.3.0) and shows
+them all; `{ enabled: true }` without `mode` written by its "add state" dialog means "always".
 
 ### Walk into the past
 

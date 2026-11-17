@@ -576,6 +576,29 @@ export class Storage {
         return row ? rowToAggregate(row) : null;
     }
 
+    /**
+     * The first hourly keyframe of a datapoint in `[from, to)`. If nothing is known before a range,
+     * e.g. because the recording started within it, the keyframe written at the start has the value.
+     */
+    public readKeyframeFrom(dp: number, from: number, to: number): StoredRow | null {
+        let result: StoredRow | null = null;
+        const sql = 'SELECT ts, val, sval FROM keyframe WHERE ts >= ? AND ts < ? AND dp = ? ORDER BY ts LIMIT 1';
+        this.scanWeeks(from, to, false, db => {
+            const row = db.prepare(sql).get(from, to, dp);
+            if (row) {
+                result = {
+                    ts: toNumber(row.ts) ?? from,
+                    val: toNumber(row.val),
+                    sval: toText(row.sval),
+                    ack: null,
+                    src: null,
+                };
+            }
+            return !result;
+        });
+        return result;
+    }
+
     /** The last 5 minute aggregate of a datapoint that starts before `ts` */
     public readAggregateBefore(dp: number, ts: number): AggregateRow | null {
         let result: AggregateRow | null = null;

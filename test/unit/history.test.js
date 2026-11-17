@@ -236,4 +236,50 @@ describe('getHistory data', () => {
             [300, 150, 30],
         );
     });
+
+    it('takes the value before the range of class "aggregated" from the keyframe if it is newer', () => {
+        const forecast = storage.upsertDp(definition('a.0.forecast', 'number', DpClass.Aggregated));
+        // one interval two days ago, then the value did not change: only the keyframes know it
+        storage.write([], undefined, [{ ts: T0 - 2 * DAY, dp: forecast.id, min: 1, max: 2, avg: 1.5, last: 2 }]);
+        storage.write([], { ts: T0 - 30 * MIN, rows: [{ dp: forecast.id, val: 2, sval: null }] });
+
+        const o = options({ start: T0, end: T0 + HOUR, aggregate: 'none' });
+        assert.deepStrictEqual(
+            readHistory(storage, forecast, o, NOTHING_PENDING).map(e => [e.ts - T0, e.val]),
+            [[-30 * MIN, 2]],
+        );
+        // the interval before the range is newer than the keyframe
+        const older = options({ start: T0 - 2 * DAY + 10 * MIN, end: T0 - DAY, aggregate: 'none' });
+        assert.deepStrictEqual(
+            readHistory(storage, forecast, older, NOTHING_PENDING).map(e => [e.ts - T0, e.val]),
+            [[-2 * DAY + 2.5 * MIN, 1.5]],
+        );
+    });
+
+    it('takes the first keyframe in the range if the recording started within it', () => {
+        // nothing before T0 + 5 min: the keyframe written at the start has the value
+        const blinds = storage.upsertDp(definition('a.0.blinds'));
+        const forecast = storage.upsertDp(definition('a.0.forecast', 'number', DpClass.Aggregated));
+        storage.write([], {
+            ts: T0 + 5 * MIN,
+            rows: [
+                { dp: blinds.id, val: 7, sval: null },
+                { dp: forecast.id, val: 3, sval: null },
+            ],
+        });
+        storage.write([{ ts: T0 + 30 * MIN, dp: blinds.id, val: 8, sval: null, ack: true, src }]);
+
+        const o = () => options({ start: T0 - DAY, end: T0 + HOUR, aggregate: 'none' });
+        assert.deepStrictEqual(
+            readHistory(storage, blinds, o(), NOTHING_PENDING).map(e => [e.ts - T0, e.val]),
+            [
+                [5 * MIN, 7],
+                [30 * MIN, 8],
+            ],
+        );
+        assert.deepStrictEqual(
+            readHistory(storage, forecast, o(), NOTHING_PENDING).map(e => [e.ts - T0, e.val]),
+            [[5 * MIN, 3]],
+        );
+    });
 });

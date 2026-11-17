@@ -235,6 +235,16 @@ function readEvents(storage: Storage, dp: DpInfo, options: GetHistoryOptions, pe
                 after = earlier(after, e);
             }
         }
+        if (!before) {
+            // nothing before the range: the recording started within it, with a keyframe of all values
+            let firstChange = Math.min(storage.readEventFrom(dp.id, start)?.ts ?? end, end);
+            for (const e of own) {
+                if (e.ts >= start && e.ts < firstChange) {
+                    firstChange = e.ts;
+                }
+            }
+            before = storage.readKeyframeFrom(dp.id, start, firstChange);
+        }
         if (before) {
             rows.unshift(before);
         }
@@ -301,24 +311,21 @@ function readAggregates(
             byTs.set(row.ts, row);
         }
     }
-    let rows = applyLimit(
+    const rows = applyLimit(
         [...byTs.values()].sort((a, b) => a.ts - b.ts),
         limit,
         newest,
     );
-    if (options.start) {
-        rows = [...(before ? [before] : []), ...rows, ...(after ? [after] : [])];
-    }
 
     const entries: IobDataEntry[] = [];
-    for (const row of rows) {
-        const add = (ts: number, val: number): void => {
-            const entry: IobDataEntry = { ts, val };
-            if (options.ack) {
-                entry.ack = true;
-            }
-            entries.push(entry);
-        };
+    const add = (ts: number, val: number): void => {
+        const entry: IobDataEntry = { ts, val };
+        if (options.ack) {
+            entry.ack = true;
+        }
+        entries.push(entry);
+    };
+    const addRow = (row: AggregateRow): void => {
         if (options.aggregate === 'min') {
             add(row.ts + HALF_INTERVAL, row.min);
         } else if (options.aggregate === 'max') {
@@ -329,6 +336,32 @@ function readAggregates(
         } else {
             add(row.ts + HALF_INTERVAL, row.avg);
         }
+    };
+
+    if (options.start) {
+        // An interval exists only where samples came in: a value that seldom changes has none for
+        // hours, but the hourly keyframe knows it. A keyframe taken after the interval before the
+        // range ended is the newer value.
+        let keyframe = storage.readValueBefore(dp.id, options.start);
+        if (!keyframe && !before) {
+            // nothing before the range: the recording started within it, with a keyframe of all values
+            let firstInterval = storage.readAggregateFrom(dp.id, start)?.ts ?? end;
+            for (const row of pending.aggregates) {
+                if (row.ts >= start) {
+                    firstInterval = Math.min(firstInterval, row.ts);
+                }
+            }
+            keyframe = storage.readKeyframeFrom(dp.id, options.start, Math.min(firstInterval, end) + HALF_INTERVAL);
+        }
+        if (keyframe?.val != null && (!before || keyframe.ts >= before.ts + AGG_INTERVAL)) {
+            add(keyframe.ts, keyframe.val);
+        } else if (before) {
+            addRow(before);
+        }
+    }
+    rows.forEach(addRow);
+    if (options.start && after) {
+        addRow(after);
     }
     return entries;
 }
