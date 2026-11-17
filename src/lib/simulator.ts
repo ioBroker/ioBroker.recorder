@@ -50,7 +50,7 @@ export interface SimulationHost {
     setState(oid: string, val: boolean | number): Promise<void>;
     /** Shows the status in `simulation.*` */
     report(status: SimulationStatus): Promise<void>;
-    /** Calls `fn` once after `ms` (the adapter's `setTimeout`, cleared on unload) */
+    /** Calls `fn` once after `ms` (adapter timer, cleared on unload) */
     startTimer(fn: () => void, ms: number): unknown;
     stopTimer(timer: unknown): void;
     now(): number;
