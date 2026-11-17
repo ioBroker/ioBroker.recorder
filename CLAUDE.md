@@ -151,6 +151,11 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
 - `from: true` also returns `user`; `q` is not stored.
 - A request for the target of a recorded alias is answered from the alias.
 
+`common.getHistory: true` in `io-package.json` is required: admin (chart in the object dialog,
+"default history" in the system settings) and the echarts editor list only instances with this
+flag. Both also list only states with an entry in `common.custom[recorder.0]`, so automatically
+selected states are not shown there (charts that name `recorder.0` explicitly work).
+
 ### Walk into the past
 
 - **Snapshot at T**: the newest keyframe at or before T (week files newest first), then the events in

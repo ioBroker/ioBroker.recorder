@@ -68,6 +68,7 @@
     "nogit": true,
     "messagebox": true,
     "supportCustoms": true,
+    "getHistory": true,
     "adminUI": {
       "config": "json",
       "custom": "json",
