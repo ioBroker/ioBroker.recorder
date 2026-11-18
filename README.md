@@ -12,8 +12,6 @@ a month) - without configuring every single state - and builds three features on
 - **Presence simulation**: replays the manual switching of lights and blinds from a past day
 - **Anomaly detection**: values and activities that do not fit the usual weekly pattern
 
-The model is the recorder of Home Assistant.
-
 > **Status:** early development. All six milestones of the plan are implemented; the long-term
 > tests on real installations are still running.
 
