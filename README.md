@@ -15,6 +15,8 @@ a month) - without configuring every single state - and builds three features on
 > **Status:** early development. All six milestones of the plan are implemented; the long-term
 > tests on real installations are still running.
 
+Deutsche Dokumentation: [docs/de/README.md](docs/de/README.md)
+
 ## Selection of the states
 
 The states are selected automatically in four steps; a later one overrides an earlier one:
@@ -60,7 +62,7 @@ lists the measured rates. Per state, "Filter" in the object browser can force "e
 
 ## Reading the data
 
-`getHistory` works like with history, sql and influxdb (same options, same aggregation by
+`getHistory` works like with `history`, `sql` and `influxdb` (same options, same aggregation by
 `@iobroker/aggregate`), so charts and scripts can use the recorder as a source:
 
 ```js
@@ -83,26 +85,254 @@ The admin tab **Time machine** shows the state of every room at any moment of th
   cursor ("07:12 Bath · Light **on** (admin)")
 - filters for room, category and "manual actions only"
 
-The same data is available for scripts, vis and the MCP server:
-
-```js
-// the state of all recorded datapoints yesterday at 20:00 (room/category/ids filter optional)
-sendTo('recorder.0', 'getSnapshot', { ts: '2026-11-16T20:00', room: 'Living room' }, answer =>
-    console.log(answer.states)); // [{ id, name, room, category, val, text, lc, from, src }]
-
-// what was switched by hand in the last 24 hours, with names and rooms
-sendTo('recorder.0', 'getEvents', { start: Date.now() - 86400000, src: 'user' }, answer =>
-    console.log(answer.events)); // [{ ts, id, name, room, val, text, from, user, src }]
-
-// changes per interval, for a density chart
-sendTo('recorder.0', 'getTimeline', { start: Date.now() - 86400000, buckets: 96 }, answer =>
-    console.log(answer.counts));
-```
-
 **Replay into states:** `recorder.0.replay.time` (writable: jump), `recorder.0.replay.speed` and
 `recorder.0.replay.active` play the past in the instance itself. With "Mirror states for the replay"
 enabled, every recorded state gets a read-only copy `recorder.0.mirror.<id with _>` that shows the
 replayed value, so a vis project can show the past without touching the real devices.
+
+### Messages for scripts, vis and the MCP server
+
+The tab uses three messages, which are available to everybody:
+
+| Message       | Answers the question                                | Result                          |
+|---------------|-----------------------------------------------------|---------------------------------|
+| `getSnapshot` | What was the state of the house at time T?          | one value per datapoint         |
+| `getEvents`   | What changed between A and B, and who changed it?   | list of changes (journal)       |
+| `getTimeline` | When was there how much activity?                   | number of changes per interval  |
+
+#### Common rules
+
+**Call** from the javascript adapter with a callback or with `sendToAsync`, from a browser with
+`socket.sendTo('recorder.0', ...)`, from the MCP server with `send_to`:
+
+```js
+sendTo('recorder.0', 'getSnapshot', { ts: '2026-11-16T20:00' }, answer => { /* ... */ });
+const answer = await sendToAsync('recorder.0', 'getEvents', { src: 'user' });
+```
+
+**Times** (`ts`, `start`, `end`): milliseconds since 1970, a number as string, or anything
+`new Date()` understands, e.g. `'2026-11-16T20:00'`. Without a time zone this is the **local time of
+the ioBroker host**.
+
+**Filters** (all three messages; each takes a single value or an array):
+
+| Filter     | Meaning                                                                                                              | Comparison                                                         |
+|------------|----------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+| `room`     | name of the room enum in the system language, e.g. `'Living room'`                                                   | case-insensitive; a datapoint in several rooms matches each of them |
+| `category` | `light`, `shading`, `climate`, `windowsDoors`, `motion`, `security`, `sockets`, `media`, `weather`, `energy`          | case-insensitive                                                   |
+| `ids`      | object IDs                                                                                                           | exact                                                              |
+| `src`      | `user`, `script`, `adapter`, `system` (only `getEvents` and `getTimeline`)                                           |                                                                    |
+
+The values of one filter are combined with OR (`room: ['Bath', 'Kitchen']`), different filters with
+AND (`room: 'Bath', category: 'light'` returns only the lights in the bath).
+
+**Sources** (`src`) are derived from `state.from`:
+
+| `src`     | `from` is ...                                                                                                                         |
+|-----------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `user`    | a user interface or a voice or chat channel: admin, web, vis, vis-2, material, iqontrol, jarvis, lovelace, cloud, iot, alexa2, matter, telegram, mcp, rest-api ... |
+| `script`  | javascript, scenes, node-red, scheduler, alarm, flow, ai-server                                                                       |
+| `adapter` | every other adapter, i.e. the device adapters (hm-rpc, zigbee, shelly ...)                                                            |
+| `system`  | `system.host.*` or unknown                                                                                                            |
+
+A switch pressed **on the wall** arrives as a confirmation (`ack: true`) of the device adapter and
+therefore has `src: 'adapter'`, not `user`.
+
+**Answers** always contain `ms` (time to compute the answer). On an error the answer is
+`{ error: '...' }`, e.g. `'The instance is not ready yet'` right after the start.
+
+**Master data**: `name`, `room`, `category` and `unit` are the *current* ones. A device renamed or
+moved to another room since then appears with its new name and room.
+
+#### `getSnapshot`: the state at one moment
+
+Request: `{ ts?, room?, category?, ids? }`. `ts` defaults to now; a time in the future is set to now.
+
+How it is computed:
+
+1. Every full hour (and at the start) the instance writes a **keyframe** with the values of all
+   recorded datapoints. The newest keyframe at or before `ts` is the base.
+2. All stored changes in (keyframe, `ts`] are applied on top, including the buffer that is not
+   written yet.
+3. Datapoints of class "aggregated" (high-frequency, e.g. power) take the `last` value of the newest
+   **finished** 5 minute interval before `ts`.
+
+So at most about one hour of changes is read; measured: about 15 ms for 1,000 datapoints.
+
+Answer:
+
+```ts
+{
+    ts: number,               // the requested time (at most now)
+    keyframe: number | null,  // time of the keyframe used; null: nothing was recorded before ts
+    states: [{
+        id, name, room, func, category, role, unit,
+        val,                  // value with its type (boolean, number, string)
+        text?,                // text from common.states, e.g. 'open' for 2
+        lc: number | null,    // time of the change if it lies between keyframe and ts, else null
+        ack?, from?, user?, src?, // only if lc is set (the value comes from a change)
+        aggregated?: true,    // last value of a 5 minute interval
+    }],                       // sorted by id
+    ms: number,
+}
+```
+
+Good to know:
+
+- **`lc: null` does not mean "never changed"**, only "not changed since the keyframe before" (at most
+  about one hour before `ts`). When the value really changed last is answered by `getHistory` or by
+  `getEvents` with a longer period.
+- The value of an aggregated datapoint can be up to 5 minutes old; its `lc` is the end of the interval.
+- `getSnapshot` has no `src` filter: a snapshot is a state, not a list of actions.
+- `keyframe: null` with empty `states`: `ts` lies before the start of the recording or before the
+  retention limit.
+
+```js
+// which lights were on yesterday at 23:00?
+sendTo('recorder.0', 'getSnapshot', { ts: '2026-11-18T23:00', category: 'light' }, a => {
+    const on = a.states.filter(s => s.val === true || (typeof s.val === 'number' && s.val > 0));
+    log(on.map(s => `${s.room}: ${s.name}`).join('\n'));
+});
+
+// were windows open at 2 am? (true or 1/2 = tilted/open)
+sendTo('recorder.0', 'getSnapshot', { ts: '2026-11-19T02:00', category: 'windowsDoors' }, a =>
+    log(a.states
+        .filter(s => s.val === true || (typeof s.val === 'number' && s.val > 0))
+        .map(s => `${s.room} ${s.name}: ${s.text ?? s.val}`)));
+
+// what was different at 18:00 compared to 08:00?
+const morning = await sendToAsync('recorder.0', 'getSnapshot', { ts: '2026-11-19T08:00' });
+const evening = await sendToAsync('recorder.0', 'getSnapshot', { ts: '2026-11-19T18:00' });
+const before = new Map(morning.states.map(s => [s.id, s.val]));
+for (const s of evening.states) {
+    if (before.get(s.id) !== s.val) {
+        log(`${s.name}: ${before.get(s.id)} -> ${s.val}`);
+    }
+}
+```
+
+#### `getEvents`: the changes in a period
+
+Request:
+
+```ts
+{
+    start?,     // default: end - 1 hour
+    end?,       // default: now
+    room?, category?, ids?,
+    src?,       // e.g. 'user' for manual actions only
+    limit?,     // default 1000, at most 10000
+    newest?,    // with more than limit changes: the newest ones instead of the oldest
+}
+```
+
+The period includes both borders, [start, end]; swapped borders are swapped back.
+
+Answer:
+
+```ts
+{
+    events: [{
+        ts, id, name, room, category, role, unit,
+        val, text?,
+        ack: boolean,   // false: command, true: confirmation or measurement of the device
+        from?, user?,   // e.g. 'system.adapter.vis-2.0', 'system.user.admin'
+        src,            // user | script | adapter | system
+    }],
+    more: boolean,      // there were more than limit changes
+    ms: number,
+}
+```
+
+`events` is **always sorted oldest first**, also with `newest: true`; `newest` only decides which
+`limit` changes are returned.
+
+Good to know:
+
+- **Command and confirmation are two entries.** A light switched from vis gives one entry with
+  `ack: false, src: 'user'` (vis) and shortly after one with `ack: true, src: 'adapter'` (device
+  adapter). With `src: 'user'` only the command remains.
+- **Wall switches** are confirmations without a command before (`ack: true`, `src: 'adapter'`). To
+  include them, ask for `src: ['user', 'adapter']` and evaluate the entries yourself.
+- **Aggregated datapoints** (power, energy, very frequent sensors) have no single changes and are not
+  listed; use `getHistory` for them.
+- Only what the **frequency filter** let through is stored: small changes of a temperature within
+  the dead band are missing.
+- **Paging**: with `more: true` request the next page with `start` = the last `ts`; entries with
+  exactly that `ts` come twice and must be skipped. Or make the period shorter.
+
+```js
+// what was switched by hand in the last 24 hours?
+sendTo('recorder.0', 'getEvents', { start: Date.now() - 86400000, src: 'user' }, a => {
+    for (const e of a.events) {
+        log(`${new Date(e.ts).toLocaleTimeString()} ${e.room ?? ''} · ${e.name}: ${e.text ?? e.val} (${e.from})`);
+    }
+});
+
+// the last 20 changes in the bath
+sendTo('recorder.0', 'getEvents',
+    { start: Date.now() - 7 * 86400000, room: 'Bath', limit: 20, newest: true }, a => log(a.events));
+
+// who opened or locked the front door yesterday evening?
+sendTo('recorder.0', 'getEvents', {
+    start: '2026-11-18T18:00',
+    end: '2026-11-18T23:59',
+    ids: ['hm-rpc.0.ABC123.1.STATE', 'nuki.0.door.lockState'],
+}, a => log(a.events.map(e => `${e.ts} ${e.name}=${e.val} ack=${e.ack} ${e.from} ${e.user ?? ''}`)));
+```
+
+#### `getTimeline`: the density of the changes
+
+Request: `{ start?, end?, buckets?, room?, category?, ids?, src? }`. `end` defaults to now, `start` to
+`end` - 24 hours, `buckets` to 100 (at most 2000).
+
+Answer:
+
+```ts
+{
+    start: number,
+    end: number,          // = start + step * buckets (can be a little after the requested end)
+    step: number,         // length of one interval in ms = ceil((end - start) / buckets), at least 1000
+    counts: number[],     // buckets entries; counts[i] is for [start + i * step, start + (i + 1) * step)
+    first: number | null, // the oldest recorded time (keyframe or change)
+    ms: number,
+}
+```
+
+Good to know:
+
+- Only changes **already written** are counted: the buffer of the last up to 30 s (`flushInterval`)
+  is missing at the right edge, and aggregated datapoints do not count.
+- `first` does not depend on the filters; it is the left border of a timeline or slider ("recorded
+  since ...").
+- Typical use: find the peaks with `getTimeline`, then get the details of interval `i` with
+  `getEvents`: `start: t.start + i * t.step, end: t.start + (i + 1) * t.step - 1`.
+
+```js
+// activity per hour in the last 7 days, motion only
+sendTo('recorder.0', 'getTimeline',
+    { start: Date.now() - 7 * 86400000, buckets: 168, category: 'motion' }, t => {
+    t.counts.forEach((n, i) => n && log(`${new Date(t.start + i * t.step).toLocaleString()}: ${n}`));
+});
+
+// the busiest quarter of an hour of last night, and what happened then
+const t = await sendToAsync('recorder.0', 'getTimeline',
+    { start: '2026-11-18T22:00', end: '2026-11-19T06:00', buckets: 32 });
+const i = t.counts.indexOf(Math.max(...t.counts));
+const a = await sendToAsync('recorder.0', 'getEvents',
+    { start: t.start + i * t.step, end: t.start + (i + 1) * t.step - 1 });
+log(a.events);
+```
+
+#### Which message for what?
+
+| Question                                                                   | Message                                                                     |
+|----------------------------------------------------------------------------|-----------------------------------------------------------------------------|
+| "What did it look like at 20:00?", a state of the house for a vis          | `getSnapshot`                                                               |
+| "What happened, and who did it?", a log, questions to an AI                | `getEvents`                                                                 |
+| a timeline, an overview of the activity                                    | `getTimeline`                                                               |
+| the course of one value for a chart, aggregated values                     | `getHistory`                                                                |
+| play the past **into states** (a vis without a script of its own)          | `replay.time` / `replay.speed` / `replay.active` with the mirror states     |
 
 ## Presence simulation
 
@@ -201,20 +431,20 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 
 ## Changelog
 ### **WORK IN PROGRESS**
-* (GermanBluefox) Fixed issues reported by repository checker (#1)
+* (bluefox) README: description of `getSnapshot`, `getEvents` and `getTimeline`; German documentation in `docs/de/README.md`
 
 ### 0.1.2 (2026-11-17)
 * (bluefox) Requires admin 7.6.17 or newer
 * (bluefox) Published with npm trusted publishing (provenance)
 
 ### 0.1.1 (2026-11-17)
-* (bluefox) README: comparison with history, sql and influxdb as a table
+* (bluefox) README: comparison with `history`, `sql` and `influxdb` as a table
 
 ### 0.1.0 (2026-11-17)
 * (bluefox) Initial version: storage layer, batched writing, keyframes, retention
 * (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
 * (bluefox) 5 minute aggregation for high-frequency values (energy)
-* (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like history, sql and influxdb; `common.getHistory`, so that admin and echarts offer the instance
+* (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like `history`, `sql` and `influxdb`; `common.getHistory`, so that admin and echarts offer the instance
 * (bluefox) Frequency filter (dead band, minimum interval, heartbeat, throttling) and classification of high-frequency states by their measured rate
 * (bluefox) Walk into the past: `getSnapshot`, `getEvents`, `getTimeline`, replay with mirror states and the admin tab "Time machine"
 * (bluefox) Presence simulation: replays the switching of lights and blinds of a recorded day at home, started by an absence state or by hand
