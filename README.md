@@ -200,6 +200,9 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 -->
 
 ## Changelog
+### **WORK IN PROGRESS**
+* (GermanBluefox) Fixed issues reported by repository checker (#1)
+
 ### 0.1.2 (2026-11-17)
 * (bluefox) Requires admin 7.6.17 or newer
 * (bluefox) Published with npm trusted publishing (provenance)
