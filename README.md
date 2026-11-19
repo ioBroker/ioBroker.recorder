@@ -440,7 +440,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 -->
 
 ## Changelog
-### **WORK IN PROGRESS**
+### 0.2.0 (2026-11-19)
 * (bluefox) The script that changed a state is recorded (`state.c` of javascript and other automations): `c` in `getSnapshot` and `getEvents`, `comment: true` in `getHistory`; the journal and the tiles of the time machine name it
 * (bluefox) Declared `common.supportedMessages.help`, so AI agents (e.g. ioBroker.pi-agent) know that the instance describes its messages
 * (bluefox) `meta.sqlite` gets schema version 6 (sources with the script); after the update, version 0.1.x cannot open it any more
