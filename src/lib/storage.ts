@@ -80,6 +80,13 @@ export interface SourceInfo {
     from: string | null;
     user: string | null;
     kind: SourceKind;
+    /** `state.c` of an automation, e.g. the script of javascript; see `sourceComment` */
+    comment: string | null;
+}
+
+/** Key of a source in the cache: from, user and comment */
+function sourceKey(from: string | null, user: string | null, comment: string | null): string {
+    return `${from ?? ''}\n${user ?? ''}\n${comment ?? ''}`;
 }
 
 /** `AND dp IN (...) AND src IN (...)`; the IDs are integers from the database, safe to inline */
@@ -225,8 +232,8 @@ export class Storage {
                  states = ?, lastSeen = ?, active = 1 WHERE id = ?`,
             ),
             setActive: this.meta.prepare('UPDATE dp SET active = ? WHERE id = ?'),
-            insertSrc: this.meta.prepare('INSERT INTO src (fromId, userId, kind) VALUES (?, ?, ?)'),
-            getSrc: this.meta.prepare('SELECT id FROM src WHERE fromId IS ? AND userId IS ?'),
+            insertSrc: this.meta.prepare('INSERT INTO src (fromId, userId, kind, comment) VALUES (?, ?, ?, ?)'),
+            getSrc: this.meta.prepare('SELECT id FROM src WHERE fromId IS ? AND userId IS ? AND comment IS ?'),
         };
 
         for (const row of this.meta.prepare('SELECT * FROM dp').all()) {
@@ -234,12 +241,13 @@ export class Storage {
             this.dpsByOid.set(dp.oid, dp);
             this.dpsById.set(dp.id, dp);
         }
-        for (const row of this.meta.prepare('SELECT id, fromId, userId, kind FROM src').all()) {
+        for (const row of this.meta.prepare('SELECT id, fromId, userId, kind, comment FROM src').all()) {
             const from = toText(row.fromId);
             const user = toText(row.userId);
+            const comment = toText(row.comment);
             const id = toNumber(row.id) ?? 0;
-            this.sources.set(`${from ?? ''}\n${user ?? ''}`, id);
-            this.sourcesById.set(id, { from, user, kind: toNumber(row.kind) ?? 3 });
+            this.sources.set(sourceKey(from, user, comment), id);
+            this.sourcesById.set(id, { from, user, kind: toNumber(row.kind) ?? 3, comment });
         }
     }
 
@@ -345,19 +353,28 @@ export class Storage {
         return count;
     }
 
-    /** Returns the ID of a source (`state.from` + `state.user`), creating it if needed */
-    public getSourceId(from: string | undefined, user: string | undefined, kind: SourceKind): number {
-        const key = `${from ?? ''}\n${user ?? ''}`;
+    /**
+     * Returns the ID of a source (`state.from` + `state.user` + the comment of an automation), creating it if needed
+     *
+     * @param from `state.from`
+     * @param user `state.user`
+     * @param kind kind of the source
+     * @param comment `state.c` as `sourceComment` gives it: only for automations
+     */
+    public getSourceId(from: string | undefined, user: string | undefined, kind: SourceKind, comment?: string): number {
+        const key = sourceKey(from ?? null, user ?? null, comment ?? null);
         const cached = this.sources.get(key);
         if (cached !== undefined) {
             return cached;
         }
-        let id = toNumber(this.statements.getSrc.get(from ?? null, user ?? null)?.id);
+        let id = toNumber(this.statements.getSrc.get(from ?? null, user ?? null, comment ?? null)?.id);
         if (id === null) {
-            id = Number(this.statements.insertSrc.run(from ?? null, user ?? null, kind).lastInsertRowid);
+            id = Number(
+                this.statements.insertSrc.run(from ?? null, user ?? null, kind, comment ?? null).lastInsertRowid,
+            );
         }
         this.sources.set(key, id);
-        this.sourcesById.set(id, { from: from ?? null, user: user ?? null, kind });
+        this.sourcesById.set(id, { from: from ?? null, user: user ?? null, kind, comment: comment ?? null });
         return id;
     }
 

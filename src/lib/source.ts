@@ -25,6 +25,25 @@ const USER_ADAPTERS = new Set([
 /** Adapters that run logic, i.e. automations */
 const SCRIPT_ADAPTERS = new Set(['javascript', 'scenes', 'node-red', 'scheduler', 'alarm', 'flow', 'ai-server']);
 
+/** Longest `state.c` that is stored */
+const MAX_COMMENT = 200;
+
+/**
+ * The comment of a change that is stored with its source: `state.c` of an automation only. javascript writes the
+ * name of the script there ("script.js.common.Light"), so the journal can say which script changed a state. Other
+ * adapters may write any text into `c`, which would give a new source per change.
+ *
+ * @param c `state.c`
+ * @param kind the kind of the source, from `classifySource`
+ */
+export function sourceComment(c: unknown, kind: SourceKind): string | undefined {
+    if (kind !== SourceKind.Script || typeof c !== 'string') {
+        return undefined;
+    }
+    const text = c.trim();
+    return text ? text.slice(0, MAX_COMMENT) : undefined;
+}
+
 /**
  * Rough classification of `state.from`. A refined detection (a device reporting a change that
  * nobody commanded is a physical switch press) follows in milestone 3.

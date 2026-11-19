@@ -129,6 +129,11 @@
         "zh-cn": "时光机"
       }
     },
+    "supportedMessages": {
+      "custom": true,
+      "getHistory": true,
+      "help": true
+    },
     "type": "storage",
     "connectionType": "local",
     "dataSource": "push",

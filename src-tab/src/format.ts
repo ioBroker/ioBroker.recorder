@@ -161,9 +161,14 @@ export function isActive(entry: Valued): boolean {
     return false;
 }
 
-/** Who caused a change: "admin, vis-2.0", "Script javascript.0", "hue.0", "System" */
-export function formatSource(entry: Pick<JournalEntry, 'src' | 'from' | 'user'>): string {
+/** Who caused a change: "admin, vis-2.0", "Script common.Light, javascript.0", "hue.0", "System" */
+export function formatSource(entry: Pick<JournalEntry, 'src' | 'from' | 'user' | 'c'>): string {
     const instance = entry.from?.replace(/^system\.adapter\./, '') || '';
+    if (entry.src === 'script' && entry.c) {
+        // javascript writes its script into `c`: "script.js.common.Light" -> "common.Light"
+        const script = entry.c.replace(/^script\.js\./, '');
+        return I18n.t('Script %s', instance ? `${script}, ${instance}` : script);
+    }
     switch (entry.src) {
         case 'user': {
             const user = entry.user?.replace(/^system\.user\./, '') || I18n.t('user');

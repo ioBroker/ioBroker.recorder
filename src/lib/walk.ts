@@ -122,9 +122,12 @@ export function stateText(states: string | null, val: ioBroker.StateValue): stri
     return undefined;
 }
 
-function sourceFields(storage: Storage, src: number | null): { from?: string; user?: string; src: SourceKindName } {
+function sourceFields(
+    storage: Storage,
+    src: number | null,
+): { from?: string; user?: string; c?: string; src: SourceKindName } {
     const source = src === null ? undefined : storage.getSource(src);
-    const result: { from?: string; user?: string; src: SourceKindName } = {
+    const result: { from?: string; user?: string; c?: string; src: SourceKindName } = {
         src: SOURCE_KIND_NAMES[source?.kind ?? SourceKind.System] || 'system',
     };
     if (source?.from) {
@@ -132,6 +135,10 @@ function sourceFields(storage: Storage, src: number | null): { from?: string; us
     }
     if (source?.user) {
         result.user = source.user;
+    }
+    if (source?.comment) {
+        // the script of javascript, e.g. "script.js.common.Light"
+        result.c = source.comment;
     }
     return result;
 }

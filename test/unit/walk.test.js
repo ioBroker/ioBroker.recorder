@@ -208,6 +208,31 @@ describe('walk into the past', () => {
         );
     });
 
+    it('names the script that changed a state in the journal and the snapshot', () => {
+        const script = storage.getSourceId(
+            'system.adapter.javascript.0',
+            undefined,
+            SourceKind.Script,
+            'script.js.common.Evening',
+        );
+        const pending = {
+            events: [{ ts: T0 + 50 * MIN, dp: light.id, val: 1, sval: null, ack: false, src: script }],
+            aggregates: [],
+        };
+        const answer = readEventList(storage, { start: T0, end: T0 + HOUR, src: 'script' }, pending, T0 + HOUR);
+        assert.deepStrictEqual(
+            answer.events.map(e => [e.name, e.src, e.from, e.c]),
+            [['Light', 'script', 'system.adapter.javascript.0', 'script.js.common.Evening']],
+        );
+        const entry = readSnapshot(storage, { ts: T0 + 55 * MIN }, pending, T0 + HOUR).states.find(
+            s => s.id === light.oid,
+        );
+        assert.strictEqual(entry.c, 'script.js.common.Evening');
+        // a change of a user has no c
+        const manual = readEventList(storage, { start: T0, end: T0 + HOUR, src: 'user' }, NO_PENDING, T0 + HOUR);
+        assert.ok(manual.events.every(e => !('c' in e)));
+    });
+
     it('lists the events with names, rooms and sources', () => {
         const answer = readEventList(storage, { start: T0, end: T0 + HOUR }, NO_PENDING, T0 + HOUR);
         assert.strictEqual(answer.more, false);

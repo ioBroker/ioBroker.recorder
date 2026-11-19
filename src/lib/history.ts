@@ -32,10 +32,15 @@ const AGGREGATES: AggregateMethod[] = [
     'integralTotal',
 ];
 
+/** The options of `getHistory`, and `comment` as history has it: return `c` (the script of javascript) */
+export interface HistoryOptions extends GetHistoryOptions {
+    comment?: boolean;
+}
+
 /** A parsed `getHistory` request */
 export interface HistoryRequest {
     id: string;
-    options: GetHistoryOptions;
+    options: HistoryOptions;
 }
 
 /** Data that is not written yet */
@@ -101,13 +106,14 @@ export function parseHistoryRequest(message: unknown, now: number = Date.now()):
     }
 
     const count = toInt(o.count);
-    const options: GetHistoryOptions = {
+    const options: HistoryOptions = {
         step: toInt(o.step) || undefined,
         count,
         ignoreNull,
         aggregate,
         limit: toInt(o.limit) || count || DEFAULT_LIMIT,
         from: !!o.from,
+        comment: !!o.comment,
         q: !!o.q,
         ack: !!o.ack,
         addId: !!o.addId,
@@ -206,7 +212,7 @@ function earlier<T extends { ts: number }>(a: T | null | undefined, b: T | null 
 }
 
 /** Entries from the events of a datapoint (the changes, as recorded) */
-function readEvents(storage: Storage, dp: DpInfo, options: GetHistoryOptions, pending: PendingData): IobDataEntry[] {
+function readEvents(storage: Storage, dp: DpInfo, options: HistoryOptions, pending: PendingData): IobDataEntry[] {
     const raw = isRawAggregate(options.aggregate);
     const start = options.start || 0;
     const end = options.end!;
@@ -260,13 +266,16 @@ function readEvents(storage: Storage, dp: DpInfo, options: GetHistoryOptions, pe
         if (options.ack) {
             entry.ack = row.ack ?? true;
         }
-        if (options.from && row.src !== null) {
+        if ((options.from || options.comment) && row.src !== null) {
             const source = storage.getSource(row.src);
-            if (source?.from) {
+            if (options.from && source?.from) {
                 entry.from = source.from;
             }
-            if (source?.user) {
+            if (options.from && source?.user) {
                 entry.user = source.user;
+            }
+            if (options.comment && source?.comment) {
+                entry.c = source.comment;
             }
         }
         return entry;
@@ -381,7 +390,7 @@ function readAggregates(
 export function readHistory(
     storage: Storage,
     dp: DpInfo,
-    options: GetHistoryOptions,
+    options: HistoryOptions,
     pending: PendingData,
 ): IobDataEntry[] {
     if (dp.cls === DpClass.Aggregated) {

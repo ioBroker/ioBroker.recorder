@@ -75,7 +75,9 @@ sendTo('recorder.0', 'getHistory', {
 }, result => console.log(result.result));
 ```
 
-Datenpunkte, die zu 5 Minuten aggregiert werden (Energie), liefern einen Wert pro Intervall.
+Datenpunkte, die zu 5 Minuten aggregiert werden (Energie), liefern einen Wert pro Intervall. `from: true`
+liefert zusätzlich `from` und `user`, `comment: true` (wie bei `history`) liefert `c`: das Skript, das den
+Wert geändert hat (javascript schreibt es in `state.c`, z. B. `script.js.common.Licht`).
 `enableHistory` / `disableHistory` setzen "immer aufzeichnen" / "nie aufzeichnen" für einen
 Datenpunkt.
 
@@ -178,7 +180,7 @@ Antwort:
         val,                  // Wert mit seinem Typ (boolean, number, string)
         text?,                // Text aus common.states, z. B. 'offen' für 2
         lc: number | null,    // Zeit der Änderung, wenn sie zwischen Keyframe und ts liegt, sonst null
-        ack?, from?, user?, src?, // nur wenn lc gesetzt ist (der Wert stammt aus einer Änderung)
+        ack?, from?, user?, c?, src?, // nur wenn lc gesetzt ist (der Wert stammt aus einer Änderung)
         aggregated?: true,    // letzter Wert eines 5-Minuten-Intervalls
     }],                       // nach id sortiert
     ms: number,
@@ -246,6 +248,7 @@ Antwort:
         val, text?,
         ack: boolean,   // false: Befehl, true: Bestätigung oder Messung des Geräts
         from?, user?,   // z. B. 'system.adapter.vis-2.0', 'system.user.admin'
+        c?,             // nur bei src script: das Skript, z. B. 'script.js.common.Licht' (javascript)
         src,            // user | script | adapter | system
     }],
     more: boolean,      // es gab mehr als limit Änderungen

@@ -84,9 +84,10 @@ gitignored, so `npm run build` must run before `npm pack`.
 
 - Data directory: `utils.getAbsoluteInstanceDataDir(this)` = `iobroker-data/recorder.0/`.
 - `meta.sqlite`: tables `dp` (master data; `dp.id` is the key used everywhere), `src` (deduplicated
-  `from`/`user`), `rate` (measured changes per minute, high-frequency flag; schema v2), `stat_hour`,
+  `from`/`user`/`comment`; `comment` is `state.c` of sources of kind script only, `sourceComment`: javascript
+  writes the script there; schema v6), `rate` (measured changes per minute, high-frequency flag; schema v2), `stat_hour`,
   `profile`, `baseline`, `anomaly` (M6, schema v3 to v5). Schema changes are migrations in `schema.ts` (`META_MIGRATIONS`), one per
-  version in `PRAGMA user_version`.
+  version in `PRAGMA user_version`; SQL, or a function where SQL is not enough (v6: ADD COLUMN only if missing).
 - `ev-YYYY-Www.sqlite`: `ev` (events), `keyframe`, `agg5` (M3). Weeks are **UTC** (Monday 00:00 UTC),
   so the file of a timestamp does not depend on time zone or DST.
 - `dp.type` (boolean/number/string/json) is an addition to the schema of the plan: it is needed to
@@ -141,8 +142,8 @@ loop every 200 detections. **The detector caches results per instance: always us
 | `getEnabledDPs` | - | `{ [id]: { enabled, category, cls, reason } }` of the recorded states |
 | `enableHistory` / `disableHistory` | `{ id, options? }` | sets `common.custom[recorder.0].mode` to `always` / `exclude` |
 | `getHighFrequency` | - | `{ text: html }` for the admin tab "High frequency" |
-| `getSnapshot` | `{ ts?, room?, category?, ids? }` | `{ ts, keyframe, states: [{ id, name, room, category, val, text, lc, from, user, src }], ms }` |
-| `getEvents` | `{ start?, end?, room?, category?, ids?, src?, limit?, newest? }` | `{ events: [{ ts, id, name, room, val, text, ack, from, user, src }], more, ms }` |
+| `getSnapshot` | `{ ts?, room?, category?, ids? }` | `{ ts, keyframe, states: [{ id, name, room, category, val, text, lc, from, user, c, src }], ms }` |
+| `getEvents` | `{ start?, end?, room?, category?, ids?, src?, limit?, newest? }` | `{ events: [{ ts, id, name, room, val, text, ack, from, user, c, src }], more, ms }` |
 | `getTimeline` | `{ start?, end?, buckets?, room?, category?, ids?, src? }` | `{ start, end, step, counts, first, ms }` |
 | `getAnomalies` | `{ start?, end?, open?, limit? }` (default: 7 days) | `{ anomalies: [{ id, ts, endTs, ackTs, rule, oid, name, room, val, text }] }` |
 | `getProfile` | `{ id }` | `{ id, name, learned, baseline, profile: [{ how, n, mean, sd, min, max, pActive, avgChanges }] }` |
@@ -165,7 +166,7 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
   interval: a value that seldom changes (a forecast) would otherwise give an empty answer.
 - Strings and JSON fall back from a numeric method to `onchange`; booleans are 0/1 for the
   aggregation and `true`/`false` for `none`/`onchange`.
-- `from: true` also returns `user`; `q` is not stored.
+- `from: true` also returns `user`; `comment: true` returns `c` (the script, as history does); `q` is not stored.
 - A request for the target of a recorded alias is answered from the alias.
 
 `common.getHistory: true` in `io-package.json` is required: admin (chart in the object dialog,

@@ -86,6 +86,44 @@ describe('storage', () => {
         assert.strictEqual(storage.getDp('a.0.temp').unit, '°C');
     });
 
+    it('keeps the script of javascript (state.c) as part of the source', () => {
+        const from = 'system.adapter.javascript.0';
+        const light = storage.getSourceId(from, undefined, SourceKind.Script, 'script.js.common.Light');
+        const blinds = storage.getSourceId(from, undefined, SourceKind.Script, 'script.js.common.Blinds');
+        const plain = storage.getSourceId(from, undefined, SourceKind.Script);
+        assert.strictEqual(new Set([light, blinds, plain]).size, 3, 'one source per script');
+        assert.strictEqual(storage.getSourceId(from, undefined, SourceKind.Script, 'script.js.common.Light'), light);
+        assert.strictEqual(storage.getSource(light).comment, 'script.js.common.Light');
+        assert.strictEqual(storage.getSource(plain).comment, null);
+
+        storage.close();
+        storage = new Storage(dir);
+        storage.open();
+        assert.strictEqual(storage.getSource(blinds).comment, 'script.js.common.Blinds');
+        assert.strictEqual(storage.getSourceId(from, undefined, SourceKind.Script, 'script.js.common.Blinds'), blinds);
+        assert.deepStrictEqual(storage.sourceIdsOfKinds(new Set([SourceKind.Script])).sort(), [light, blinds, plain].sort());
+    });
+
+    it('migrates the sources of version 5 (without comment)', () => {
+        const old = storage.getSourceId('system.adapter.javascript.0', undefined, SourceKind.Script);
+        storage.close();
+        const { DatabaseSync } = require('node:sqlite');
+        const db = new DatabaseSync(join(dir, 'meta.sqlite'));
+        // the table src as version 5 had it
+        db.exec(`DROP INDEX src_from_user_comment;
+            ALTER TABLE src DROP COLUMN comment;
+            CREATE UNIQUE INDEX src_from_user ON src(fromId, userId);
+            PRAGMA user_version = 5;`);
+        db.close();
+
+        storage = new Storage(dir);
+        storage.open();
+        assert.strictEqual(storage.getSource(old).comment, null, 'the old source is kept');
+        assert.strictEqual(storage.getSourceId('system.adapter.javascript.0', undefined, SourceKind.Script), old);
+        const script = storage.getSourceId('system.adapter.javascript.0', undefined, SourceKind.Script, 'script.js.a');
+        assert.notStrictEqual(script, old, 'the same from and user with a script is a new source');
+    });
+
     it('marks datapoints inactive without deleting them', () => {
         const a = storage.upsertDp(definition('a.0.x'));
         const b = storage.upsertDp(definition('a.0.y'));
@@ -138,5 +176,23 @@ describe('storage', () => {
         // exactly the last 14 days (plus the current one) remain
         assert.strictEqual(storage.countEvents(0, now + 1), 15);
         assert.ok(!readdirSync(dir).some(f => f.endsWith('-wal') && !existsSync(join(dir, f.replace(/-wal$/, '')))));
+    });
+});
+
+describe('sourceComment', () => {
+    const { sourceComment, classifySource } = require('../../build/lib/source');
+
+    it('keeps state.c of automations only', () => {
+        const kind = classifySource('system.adapter.javascript.0');
+        assert.strictEqual(kind, SourceKind.Script);
+        assert.strictEqual(sourceComment('script.js.common.Light', kind), 'script.js.common.Light');
+        assert.strictEqual(sourceComment('  script.js.x  ', kind), 'script.js.x');
+        assert.strictEqual(sourceComment('', kind), undefined);
+        assert.strictEqual(sourceComment(undefined, kind), undefined);
+        assert.strictEqual(sourceComment(42, kind), undefined);
+        assert.strictEqual(sourceComment('x'.repeat(300), kind).length, 200);
+        // other adapters may write any text, which would give a source per change
+        assert.strictEqual(sourceComment('changed at 12:00', classifySource('system.adapter.hue.0')), undefined);
+        assert.strictEqual(sourceComment('by Anna', classifySource('system.adapter.admin.0')), undefined);
     });
 });

@@ -103,6 +103,7 @@ function applyEvents(states: SnapshotEntry[], events: JournalEntry[]): SnapshotE
             ack: e.ack,
             from: e.from,
             user: e.user,
+            c: e.c,
             src: e.src,
         });
     }

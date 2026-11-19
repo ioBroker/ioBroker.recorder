@@ -138,6 +138,24 @@ describe('getHistory data', () => {
         assert.strictEqual(data[2].ack, false);
         assert.strictEqual(data[1].from, 'system.adapter.vis-2.0');
         assert.strictEqual(data[1].user, 'system.user.admin');
+        assert.ok(!('c' in data[1]), 'c only with comment');
+    });
+
+    it('returns the script of javascript with comment, as history does', () => {
+        const script = storage.getSourceId(
+            'system.adapter.javascript.0',
+            undefined,
+            SourceKind.Script,
+            'script.js.common.Heating',
+        );
+        storage.write([{ ts: T0 + 30 * MIN, dp: temp.id, val: 23, sval: null, ack: false, src: script }]);
+        const read = message =>
+            readHistory(storage, temp, options({ start: T0, end: T0 + HOUR, aggregate: 'none', ...message }), NOTHING_PENDING)
+                .filter(e => e.ts === T0 + 30 * MIN)[0];
+        assert.strictEqual(read({ comment: true }).c, 'script.js.common.Heating');
+        assert.ok(!('from' in read({ comment: true })), 'from only with from');
+        assert.ok(!('c' in read({ from: true })), 'c only with comment');
+        assert.strictEqual(read({ from: true, comment: true }).from, 'system.adapter.javascript.0');
     });
 
     it('finds the value before the range in an older week', () => {

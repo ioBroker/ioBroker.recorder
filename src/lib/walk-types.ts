@@ -40,6 +40,8 @@ export interface SnapshotEntry {
     ack?: boolean;
     from?: string;
     user?: string;
+    /** `state.c` of an automation: javascript writes the script there, e.g. "script.js.common.Light" */
+    c?: string;
     src?: SourceKindName;
     /** High-frequency datapoint: the last value of the last finished 5 minute interval */
     aggregated?: true;
@@ -84,6 +86,8 @@ export interface JournalEntry {
     ack: boolean;
     from?: string;
     user?: string;
+    /** `state.c` of an automation: javascript writes the script there, e.g. "script.js.common.Light" */
+    c?: string;
     src: SourceKindName;
 }
 

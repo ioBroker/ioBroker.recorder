@@ -72,7 +72,9 @@ sendTo('recorder.0', 'getHistory', {
 }, result => console.log(result.result));
 ```
 
-Datapoints that are aggregated to 5 minutes (energy) return one value per interval.
+Datapoints that are aggregated to 5 minutes (energy) return one value per interval. `from: true` also
+returns `from` and `user`, `comment: true` (as with `history`) returns `c`: the script that changed the
+value (javascript writes it into `state.c`, e.g. `script.js.common.Light`).
 `enableHistory` / `disableHistory` set "always record" / "never record" for a state.
 
 ## Walk into the past
@@ -170,7 +172,7 @@ Answer:
         val,                  // value with its type (boolean, number, string)
         text?,                // text from common.states, e.g. 'open' for 2
         lc: number | null,    // time of the change if it lies between keyframe and ts, else null
-        ack?, from?, user?, src?, // only if lc is set (the value comes from a change)
+        ack?, from?, user?, c?, src?, // only if lc is set (the value comes from a change)
         aggregated?: true,    // last value of a 5 minute interval
     }],                       // sorted by id
     ms: number,
@@ -237,6 +239,7 @@ Answer:
         val, text?,
         ack: boolean,   // false: command, true: confirmation or measurement of the device
         from?, user?,   // e.g. 'system.adapter.vis-2.0', 'system.user.admin'
+        c?,             // src script only: the script, e.g. 'script.js.common.Light' (javascript)
         src,            // user | script | adapter | system
     }],
     more: boolean,      // there were more than limit changes
@@ -437,6 +440,11 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 -->
 
 ## Changelog
+### **WORK IN PROGRESS**
+* (bluefox) The script that changed a state is recorded (`state.c` of javascript and other automations): `c` in `getSnapshot` and `getEvents`, `comment: true` in `getHistory`; the journal and the tiles of the time machine name it
+* (bluefox) Declared `common.supportedMessages.help`, so AI agents (e.g. ioBroker.pi-agent) know that the instance describes its messages
+* (bluefox) `meta.sqlite` gets schema version 6 (sources with the script); after the update, version 0.1.x cannot open it any more
+
 ### 0.1.3 (2026-11-19)
 * (bluefox) README: description of `getSnapshot`, `getEvents` and `getTimeline`; German documentation in `docs/de/README.md`
 * (bluefox) Message `help`: describes all messages and states for an AI agent (e.g. ioBroker.pi-agent); an unknown message answers with the list of messages

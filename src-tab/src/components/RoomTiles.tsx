@@ -16,7 +16,15 @@ import {
 import { I18n } from '@iobroker/gui-components';
 
 import type { SnapshotEntry } from '../api';
-import { CATEGORY_LABELS, categoryOrder, compareText, formatShort, formatValue, isActive } from '../format';
+import {
+    CATEGORY_LABELS,
+    categoryOrder,
+    compareText,
+    formatShort,
+    formatSource,
+    formatValue,
+    isActive,
+} from '../format';
 
 const ICONS: Record<string, React.ComponentType<{ className?: string; fontSize?: 'small' }>> = {
     light: Lightbulb,
@@ -146,6 +154,10 @@ function tooltip(entry: SnapshotEntry): string {
     }
     if (entry.lc !== null) {
         lines.push(I18n.t('changed at %s', formatShort(entry.lc)));
+        if (entry.src) {
+            // who: the user, the script, the adapter
+            lines.push(formatSource({ src: entry.src, from: entry.from, user: entry.user, c: entry.c }));
+        }
     }
     if (entry.aggregated) {
         lines.push(I18n.t('5 minute value'));

@@ -41,7 +41,7 @@ import {
     type SimulationStatus,
     type SimulatorSettings,
 } from './lib/simulator';
-import { classifySource } from './lib/source';
+import { classifySource, sourceComment } from './lib/source';
 import { DRIVER_NAME } from './lib/sqlite';
 import { HourStats, hourFloor } from './lib/stats';
 import { Storage } from './lib/storage';
@@ -1320,6 +1320,17 @@ class RecorderAdapter extends utils.Adapter {
 
     // ---------------------------------------------------------------- recording
 
+    /**
+     * The source of a change: from, user, and for an automation `state.c` (javascript: the script)
+     *
+     * @param storage open storage
+     * @param state the changed state
+     */
+    private sourceIdOf(storage: Storage, state: ioBroker.State): number {
+        const kind = classifySource(state.from);
+        return storage.getSourceId(state.from, state.user, kind, sourceComment(state.c, kind));
+    }
+
     private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
         if (this.simTrigger && id === this.simTrigger) {
             // the trigger may be recorded as well
@@ -1394,7 +1405,7 @@ class RecorderAdapter extends utils.Adapter {
                 val: stored.val,
                 sval: stored.sval,
                 ack,
-                src: storage.getSourceId(state.from, state.user, classifySource(state.from)),
+                src: this.sourceIdOf(storage, state),
             },
             this.filters.get(dp.id) || { rule: null, burst: true },
         );

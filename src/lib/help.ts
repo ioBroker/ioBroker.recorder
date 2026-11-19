@@ -39,22 +39,24 @@ Filters of getSnapshot, getEvents and getTimeline, each one value or a list (val
 - ids: object IDs
 - src (getEvents, getTimeline): user (admin, vis, apps, voice assistants, chat), script, adapter (the devices),
   system. A switch pressed on the wall is src adapter with ack true (no command before it), not user.
+  c (in the answers, src script only): the script that changed it, e.g. "script.js.common.Light" (javascript).
 
 Commands (sendTo recorder.0):
 - getSnapshot {ts?, room?, category?, ids?}: the value of every recorded state at ts (default now):
-  {ts, keyframe, states: [{id, name, room, category, unit, val, text?, lc, from?, user?, src?}]}.
+  {ts, keyframe, states: [{id, name, room, category, unit, val, text?, lc, from?, user?, c?, src?}]}.
   text = the meaning of the value (e.g. "open"). lc = time of the last change only if it was within about the
   hour before ts, else null (null does not mean "never changed"). keyframe null: nothing recorded before ts.
 - getEvents {start?, end?, room?, category?, ids?, src?, limit?, newest?}: the changes in [start, end] (default
-  the last hour), oldest first: {events: [{ts, id, name, room, val, text?, ack, from, user?, src}], more}.
+  the last hour), oldest first: {events: [{ts, id, name, room, val, text?, ack, from, user?, c?, src}], more}.
   ack false = a command, ack true = confirmation or measurement of the device (a command from a vis gives two
   entries). limit default 1000, at most 10000; more = there were more; newest = the newest ones instead of the
   oldest. High-frequency values (power, energy) are not listed: use getHistory.
 - getTimeline {start?, end?, buckets?, room?, category?, ids?, src?}: number of changes per interval (default
   the last 24 h in 100 buckets): {start, step, counts, first}; first = since when anything is recorded.
-- getHistory {id, options: {start?, end?, aggregate?, step?, count?, from?}}: the course of one state as with
-  history, sql and influxdb: {result: [{ts, val}]}. aggregate none or onchange = the stored values; average
-  (the default), min, max, minmax, total, percentile, integral = one value per step.
+- getHistory {id, options: {start?, end?, aggregate?, step?, count?, from?, comment?}}: the course of one state as
+  with history, sql and influxdb: {result: [{ts, val}]}, from: also from and user, comment: also c (the script).
+  aggregate none or onchange = the stored values; average (the default), min, max, minmax, total, percentile,
+  integral = one value per step.
 - getSelection: every recorded state: [{id, name, room, func, category, cls, reason}]; the room names to filter
   by, reason = why it is recorded.
 - getAnomalies {start?, end?, open?, limit?}: the anomalies (default the last 7 days; open: only the open ones):

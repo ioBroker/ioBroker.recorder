@@ -219,15 +219,43 @@ CREATE TABLE profile (                   -- one hour of the week of one datapoin
 DELETE FROM baseline;
 `;
 
+/**
+ * v6: `state.c` of automations (javascript writes the name of the script there) is part of the source, so the
+ * journal can say which script changed a state. Older sources keep `comment` NULL.
+ */
+function metaSchemaV6(db: SqliteDatabase): void {
+    // SQLite has no ADD COLUMN IF NOT EXISTS
+    if (
+        !db
+            .prepare('PRAGMA table_info(src)')
+            .all()
+            .some(column => column.name === 'comment')
+    ) {
+        db.exec('ALTER TABLE src ADD COLUMN comment TEXT');
+    }
+    db.exec(`DROP INDEX IF EXISTS src_from_user;
+        CREATE UNIQUE INDEX IF NOT EXISTS src_from_user_comment ON src(fromId, userId, comment);`);
+}
+
+/** A migration: SQL, or a function for what SQL cannot say */
+type Migration = string | ((db: SqliteDatabase) => void);
+
 /** Index = version - 1. Each migration runs once, in one transaction with the version update. */
-const META_MIGRATIONS = [META_SCHEMA_V1, META_SCHEMA_V2, META_SCHEMA_V3, META_SCHEMA_V4, META_SCHEMA_V5];
+const META_MIGRATIONS: Migration[] = [
+    META_SCHEMA_V1,
+    META_SCHEMA_V2,
+    META_SCHEMA_V3,
+    META_SCHEMA_V4,
+    META_SCHEMA_V5,
+    metaSchemaV6,
+];
 const EVENTS_MIGRATIONS = [EVENTS_SCHEMA_V1];
 
 function getVersion(db: SqliteDatabase): number {
     return toNumber(db.prepare('PRAGMA user_version').get()?.user_version) ?? 0;
 }
 
-function applySchema(db: SqliteDatabase, migrations: string[], fileName: string): void {
+function applySchema(db: SqliteDatabase, migrations: Migration[], fileName: string): void {
     const version = migrations.length;
     const current = getVersion(db);
     if (current > version) {
@@ -239,7 +267,12 @@ function applySchema(db: SqliteDatabase, migrations: string[], fileName: string)
         db.exec('BEGIN');
         try {
             for (let v = current; v < version; v++) {
-                db.exec(migrations[v]);
+                const migration = migrations[v];
+                if (typeof migration === 'string') {
+                    db.exec(migration);
+                } else {
+                    migration(db);
+                }
             }
             db.exec(`PRAGMA user_version = ${version}`);
             db.exec('COMMIT');
