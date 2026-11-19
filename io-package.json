@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "recorder",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "news": {
+      "0.1.3": {
+        "en": "README: description of `getSnapshot`, `getEvents` and `getTimeline`; German documentation in `docs/de/README.md`\nMessage `help`: describes all messages and states for an AI agent (e.g. ioBroker.pi-agent); an unknown message answers with the list of messages",
+        "de": "README: Beschreibung von `getSnapshot`, `getEvents` und `getTimeline`; deutsche Dokumentation in `docs/DE/README.md`\nNachricht `help`: beschreibt alle Meldungen und Status eines AI-Agenten (z. B. ioBroker.PI-Agent); eine unbekannte Nachricht gibt eine Liste an",
+        "ru": "README: описание «GetSnapshot», «GetEvents» и «GetTimeline»; документация на немецком языке в `docs/de/readme.md`\nСообщение `help`: описывает все сообщения и состояния агента ИИ (например, IOBroker.pi-agent); неизвестное сообщение отвечает списком сообщений",
+        "pt": "README: descrição de getSnapshot`, `getEvents` e `getTimeline`; documentação alemã em `docs/de/README.md`\nMensagem `help`: descreve todas as mensagens e estados de um agente de IA (ex: IOBroker.pi-Agent); uma mensagem desconhecida",
+        "nl": "README: beschrijving van `GetSnapshot`, `getEvents` en `GetTimeLine`; Duitse documentatie in `docs/de/README.md`\nBericht `help`: beschrijft alle berichten en statussen voor een AI-agent (bijv. IOBroker.pi-Agent); een onbekend bericht beantwoordt met de lijst van berichten",
+        "fr": "README : description de « GetSnapshot », « GetEvents » et « GetTimeline » ; documentation en allemand dans « Docs/de/README.md »\nMessage « help » : décrit tous les messages et états d'un agent IA (par exemple IObroker.pi-Agent) ; un message inconnu répond par la liste des messages",
+        "it": "README: descrizione di `getSnapshot`, `getEvents` e `getTimeline`; in tedesco in `docs/DE/README.md`\nMessaggio `help`: descrive tutti i messaggi e gli stati di un agente AI (ad es. IObroker.pi-agent); un messaggio sconosciuto risponde",
+        "es": "README: descripción de `GetSnapshot`, `GetEvents` y `GetTimeline`; documentación en alemán en `docs/DE/README.md`\nMensaje «ayuda»: describe todos los mensajes y estados de un agente de IA (por ejemplo, IOBroker.pi-Agent); un desconocido responde con la lista de mensajes",
+        "pl": "README: opis `GetSnapshot`, `GetEvents` i `GetTimeline`; niemiecka dokumentacja w `docs/de/README.md`\nWiadomość „help”: opisuje wszystkie wiadomości i stany dla agenta AI (np. IOBroker.pi-Agent); nieznana wiadomość odpowiada z listą wiadomości",
+        "uk": "README: опис `getSnapshot`, `getEvents` і `getTimeline`; німецька документація в `docs/de/README.md`\nПовідомлення `help`: описує всі повідомлення та стани агента AI (наприклад, IObroker.pi-Agent); невідоме повідомлення відповідає зі списком повідомлень",
+        "zh-cn": "自述文件：`getSnapshot`、`getEvents` 和 `getTimeline`的描述；`docs/de/readme.md`中的德语文档\n消息 “帮助”：描述 AI 代理（例如 IOBroker.PI-Agent）的所有消息和状态；未知消息使用消息列表回答"
+      },
       "0.1.2": {
         "en": "Requires admin 7.6.17 or newer\nPublished with npm trusted publishing (provenance)",
         "de": "Benötigt admin 7.6.17 oder neuer\nVeröffentlicht mit npm Trusted Publishing (Provenance)",

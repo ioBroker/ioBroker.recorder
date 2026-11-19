@@ -437,7 +437,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 -->
 
 ## Changelog
-### **WORK IN PROGRESS**
+### 0.1.3 (2026-11-19)
 * (bluefox) README: description of `getSnapshot`, `getEvents` and `getTimeline`; German documentation in `docs/de/README.md`
 * (bluefox) Message `help`: describes all messages and states for an AI agent (e.g. ioBroker.pi-agent); an unknown message answers with the list of messages
 
