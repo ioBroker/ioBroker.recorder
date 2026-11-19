@@ -395,6 +395,13 @@ datapoint" need the counted updates, which the recording does not contain: they 
   week with mean, deviation, minimum, maximum and share of activity), `ackAnomaly` (`{ id }`, without
   `id`: all).
 
+## For AI agents
+
+`sendTo('recorder.0', 'help', {})` answers `{ help: '...' }`: a text for an AI agent (e.g. ioBroker.pi-agent, or
+the MCP server with `send_to`) that describes all messages with their filters and answers, the states, and how to
+answer the user (names and rooms instead of IDs, filters instead of the whole house, changes only on request).
+An unknown message answers `{ error, commands }` with the list of all messages.
+
 ## How it differs from `history`, `sql` and `influxdb`
 
 |                      | recorder                                                                                                                                                                                         | `history`, `sql`, `influxdb`                                                              |
@@ -432,6 +439,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 ## Changelog
 ### **WORK IN PROGRESS**
 * (bluefox) README: description of `getSnapshot`, `getEvents` and `getTimeline`; German documentation in `docs/de/README.md`
+* (bluefox) Message `help`: describes all messages and states for an AI agent (e.g. ioBroker.pi-agent); an unknown message answers with the list of messages
 
 ### 0.1.2 (2026-11-17)
 * (bluefox) Requires admin 7.6.17 or newer

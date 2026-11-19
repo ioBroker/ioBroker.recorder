@@ -409,6 +409,14 @@ Sie starten nach 7 Tagen.
   der Woche mit Mittelwert, Abweichung, Minimum, Maximum und Anteil der Aktivität), `ackAnomaly`
   (`{ id }`, ohne `id`: alle).
 
+## Für KI-Agenten
+
+`sendTo('recorder.0', 'help', {})` antwortet mit `{ help: '...' }`: einem Text für einen KI-Agenten (z. B.
+ioBroker.pi-agent oder den MCP-Server mit `send_to`), der alle Nachrichten mit ihren Filtern und Antworten, die
+Datenpunkte und den Umgang mit dem Benutzer beschreibt (Namen und Räume statt IDs, Filter statt des ganzen Hauses,
+Änderungen nur auf Wunsch). Der Text ist englisch. Eine unbekannte Nachricht antwortet mit `{ error, commands }`,
+der Liste aller Nachrichten.
+
 ## Unterschied zu `history`, `sql` und `influxdb`
 
 |                          | recorder                                                                                                                                                                                                 | `history`, `sql`, `influxdb`                                                                   |

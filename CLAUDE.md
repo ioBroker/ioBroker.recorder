@@ -69,6 +69,7 @@ gitignored, so `npm run build` must run before `npm pack`.
 | `src/lib/simulator.ts` | `PresenceSimulation` (timers, switching, stop) behind `SimulationHost`, `planSimulatedDay`, `renderPlan` |
 | `src-tab/` | admin tab "Time machine" (React 19, MUI, gui-components, vite): `TimeMachine`, `Timeline`, `RoomTiles`, `Journal` |
 | `tasks.ts` | build of the tab into `admin/` |
+| `src/lib/help.ts` | `HELP` (answer of `help`, for AI agents) and `COMMANDS` (all commands of `onMessage`) |
 | `src/lib/history.ts` | `getHistory`: options parsed like sql (`parseHistoryRequest`), reading with border values (`readHistory`) |
 | `src/lib/storage.ts` | `Storage`: meta.sqlite + one file per week, upsert of datapoints, sources, batch write, retention |
 | `src/lib/schema.ts` | SQL schemas, versioned with `PRAGMA user_version` |
@@ -131,6 +132,7 @@ loop every 200 detections. **The detector caches results per instance: always us
 
 | Command | Message | Answer |
 | --- | --- | --- |
+| `help` | - | `{ help: text }` for an AI agent (`src/lib/help.ts`; `COMMANDS` must match the `case`s, a unit test checks it) |
 | `getSelection` | - | `[{ id, name, room, func, category, devType, cls, reason }]` |
 | `previewSelection` | (unsaved) native config | `{ text: html, count, mbPerMonth }` for `textSendTo` with `container: html` |
 | `recalculate` | - | `{ result }` after a selection run |

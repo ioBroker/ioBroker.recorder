@@ -19,6 +19,7 @@ import {
     type RoleRule,
 } from './lib/filter';
 import { AnomalyDetector, type DetectorHost } from './lib/detector';
+import { COMMANDS, HELP } from './lib/help';
 import { parseHistoryRequest, readHistory, toTimestamp } from './lib/history';
 import { estimateSize, renderHighFrequency, renderPreview, summaryText } from './lib/preview';
 import {
@@ -508,6 +509,11 @@ class RecorderAdapter extends utils.Adapter {
             }
         };
         switch (obj.command) {
+            case 'help':
+                // what the instance answers, for an AI agent
+                respond({ help: HELP });
+                break;
+
             case 'getSelection':
                 respond(this.getSelectionInfo());
                 break;
@@ -603,7 +609,7 @@ class RecorderAdapter extends utils.Adapter {
                 break;
 
             default:
-                respond({ error: `Unknown command: ${obj.command}` });
+                respond({ error: `Unknown command: ${obj.command}`, commands: COMMANDS });
         }
     }
 
