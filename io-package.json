@@ -42,19 +42,6 @@
         "uk": "Потрібен admin 7.6.17 або новіший\nОпубліковано через npm Trusted Publishing (provenance)",
         "zh-cn": "需要 admin 7.6.17 或更高版本\n通过 npm Trusted Publishing 发布（provenance）"
       },
-      "0.1.1": {
-        "en": "README: comparison with history, sql and influxdb as a table",
-        "de": "README: Vergleich mit history, sql und influxdb als Tabelle",
-        "ru": "README: сравнение с history, sql и influxdb в виде таблицы",
-        "pt": "README: comparação com history, sql e influxdb em tabela",
-        "nl": "README: vergelijking met history, sql en influxdb als tabel",
-        "fr": "README : comparaison avec history, sql et influxdb sous forme de tableau",
-        "it": "README: confronto con history, sql e influxdb come tabella",
-        "es": "README: comparación con history, sql e influxdb como tabla",
-        "pl": "README: porównanie z history, sql i influxdb w formie tabeli",
-        "uk": "README: порівняння з history, sql та influxdb у вигляді таблиці",
-        "zh-cn": "README：以表格形式与 history、sql 和 influxdb 进行比较"
-      },
       "0.1.0": {
         "en": "First release. Records all relevant states automatically, without settings per state. Includes getHistory like history/sql/influxdb, the time machine with replay, presence simulation and anomaly detection.",
         "de": "Erste Version. Zeichnet alle relevanten Datenpunkte automatisch auf, ohne Einstellungen pro Datenpunkt. Mit getHistory wie bei history/sql/influxdb, der Zeitmaschine mit Wiedergabe, Anwesenheitssimulation und Anomalieerkennung.",
@@ -158,7 +145,7 @@
     ],
     "globalDependencies": [
       {
-        "admin": ">=7.6.17"
+        "admin": ">=7.6.20"
       }
     ]
   },
