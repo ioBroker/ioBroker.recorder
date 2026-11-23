@@ -400,10 +400,14 @@ datapoint" need the counted updates, which the recording does not contain: they 
 
 ## For AI agents
 
-`sendTo('recorder.0', 'help', {})` answers `{ help: '...' }`: a text for an AI agent (e.g. ioBroker.pi-agent, or
+`sendTo('recorder.0', 'help', {})` answers `{ help: '...', commands }`: a text for an AI agent (e.g. ioBroker.pi-agent, or
 the MCP server with `send_to`) that describes all messages with their filters and answers, the states, and how to
 answer the user (names and rooms instead of IDs, filters instead of the whole house, changes only on request).
-An unknown message answers `{ error, commands }` with the list of all messages.
+`commands` lists every message with `write: true` for the ones that change something. An unknown message answers `{ error, commands }` with the list of all messages.
+
+`getEvents`, `getHistory`, `aggregate` and `lastChange` are standard commands of the shared catalog of sendTo commands (family `history`, marked with `standard` in `commands`), the same in history, sql, influxdb and recorder:
+- `aggregate {id, start, end?, fn, value?}` answers one number for a period, `{value, ts?, unit?, count}`. `fn`: `min`, `max`, `avg`, `sum`, `count` (with `value`: how often the state became it), `delta` (how much a counter rose, resets included), `first`, `last`, `integral` (value × hours, W gives Wh), `duration` (with `value`: seconds the state had it).
+- `lastChange {id, value?, before?}` answers when the state last changed (to `value`): `{ts, val}`.
 
 ## How it differs from `history`, `sql` and `influxdb`
 
@@ -441,6 +445,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 
 ## Changelog
 ### **WORK IN PROGRESS**
+* (GermanBluefox) Added the standard commands of the shared catalog: history.aggregate (one number for a period: min, max, avg, sum, count, delta, first, last, integral, duration) and history.lastChange; getEvents and getHistory are marked as history.getEvents and history.getHistory; `help` answers also `commands` with `write` and `standard`
 * (GermanBluefox) Requires admin 7.6.20 or newer; fixed issues detected by the repository checker (#3)
 
 ### 0.2.0 (2026-11-19)

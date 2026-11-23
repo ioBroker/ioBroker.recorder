@@ -376,6 +376,35 @@ function readAggregates(
 }
 
 /**
+ * The stored values for `aggregate` and `lastChange` of the shared catalog (standardHistory.ts), read as `getHistory`
+ * reads them with aggregate none: with `start` the oldest `count` values of the range (and the values just before
+ * and after it), without it the newest `count` values up to `end`.
+ *
+ * @param storage the storage
+ * @param dp the datapoint
+ * @param query the range and the number of values
+ * @param query.start the beginning of the range
+ * @param query.end the end of the range
+ * @param query.count the number of values
+ * @param pending events and aggregates that are not written yet
+ */
+export function readStoredValues(
+    storage: Storage,
+    dp: DpInfo,
+    query: { start?: number; end: number; count: number },
+    pending: PendingData,
+): IobDataEntry[] {
+    const request = parseHistoryRequest({
+        id: dp.oid,
+        options: { start: query.start, end: query.end, count: query.count, limit: query.count, aggregate: 'none' },
+    });
+    if ('error' in request) {
+        throw new Error(request.error);
+    }
+    return readHistory(storage, dp, request.options, pending);
+}
+
+/**
  * Reads the data of a `getHistory` request, sorted by time, including the values not written yet
  * and the values just before and after the range. The result is handed to `sendResponse` of
  * `@iobroker/aggregate`, which cuts and aggregates it.

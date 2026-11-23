@@ -4,26 +4,31 @@
  */
 import { CATEGORIES } from './categories';
 
-/** The commands `onMessage` answers */
-export const COMMANDS = [
-    'help',
-    'getSnapshot',
-    'getEvents',
-    'getTimeline',
-    'getHistory',
-    'getSelection',
-    'getAnomalies',
-    'getProfile',
-    'ackAnomaly',
-    'getSimulationPlan',
-    'enableHistory',
-    'disableHistory',
-    'getEnabledDPs',
-    'features',
-    'recalculate',
-    'previewSelection',
-    'getHighFrequency',
-    'getAnomalyInfo',
+/**
+ * The commands `onMessage` answers; `write` = it changes something; `standard` = it follows the shared catalog of
+ * sendTo commands (HELP.md of ioBroker.assistant), the same in history, sql, influxdb and recorder
+ */
+export const COMMANDS: { command: string; write: boolean; standard?: string }[] = [
+    { command: 'help', write: false },
+    { command: 'getSnapshot', write: false },
+    { command: 'getEvents', write: false, standard: 'history.getEvents' },
+    { command: 'getTimeline', write: false },
+    { command: 'getHistory', write: false, standard: 'history.getHistory' },
+    { command: 'aggregate', write: false, standard: 'history.aggregate' },
+    { command: 'lastChange', write: false, standard: 'history.lastChange' },
+    { command: 'getSelection', write: false },
+    { command: 'getAnomalies', write: false },
+    { command: 'getProfile', write: false },
+    { command: 'ackAnomaly', write: true },
+    { command: 'getSimulationPlan', write: false },
+    { command: 'enableHistory', write: true },
+    { command: 'disableHistory', write: true },
+    { command: 'getEnabledDPs', write: false },
+    { command: 'features', write: false },
+    { command: 'recalculate', write: true },
+    { command: 'previewSelection', write: false },
+    { command: 'getHighFrequency', write: false },
+    { command: 'getAnomalyInfo', write: false },
 ];
 
 export const HELP = `ioBroker.recorder: records the relevant states of the house by itself (no setting per state) for 1 to 90
@@ -41,7 +46,8 @@ Filters of getSnapshot, getEvents and getTimeline, each one value or a list (val
   system. A switch pressed on the wall is src adapter with ack true (no command before it), not user.
   c (in the answers, src script only): the script that changed it, e.g. "script.js.common.Light" (javascript).
 
-Commands (sendTo recorder.0):
+Commands (sendTo recorder.0): getEvents, getHistory, aggregate and lastChange are standard commands of the shared
+catalog of ioBroker (family history): the same names, parameters and answers in history, sql, influxdb and recorder.
 - getSnapshot {ts?, room?, category?, ids?}: the value of every recorded state at ts (default now):
   {ts, keyframe, states: [{id, name, room, category, unit, val, text?, lc, from?, user?, c?, src?}]}.
   text = the meaning of the value (e.g. "open"). lc = time of the last change only if it was within about the
@@ -57,6 +63,15 @@ Commands (sendTo recorder.0):
   with history, sql and influxdb: {result: [{ts, val}]}, from: also from and user, comment: also c (the script).
   aggregate none or onchange = the stored values; average (the default), min, max, minmax, total, percentile,
   integral = one value per step.
+- aggregate {id, start, end?, fn, value?}: one number for a period: {value, ts?, unit?, count}. fn: min, max (ts =
+  when), avg (the mean of the stored values), sum, count (with value: how often the state became it, e.g. true),
+  delta (how much a counter rose, resets included), first, last, integral (value × hours: W gives Wh), duration
+  (with value: how many seconds the state had it). end: default now. count: the stored values in the period, at
+  most 50000 (else reason TOO_MANY_VALUES). Errors: {error, reason} (reason BAD_REQUEST for a wrong parameter).
+  Computed from the values of getHistory (aggregate none; high-frequency values: the means per 5 minutes).
+- lastChange {id, value?, before?}: when the state last changed (to value): {ts, val}; before: only the values
+  before this time. Reason NOT_FOUND if it never had the value; only the newest 10000 stored values are searched:
+  limited true = it had it already then.
 - getSelection: every recorded state: [{id, name, room, func, category, cls, reason}]; the room names to filter
   by, reason = why it is recorded.
 - getAnomalies {start?, end?, open?, limit?}: the anomalies (default the last 7 days; open: only the open ones):
@@ -84,6 +99,8 @@ How to talk to the user:
 - Use the filters: a snapshot of the whole house is large. If a room gives nothing, take its name from
   getSelection.
 - "Who did it": from (e.g. system.adapter.vis-2.0), user (e.g. system.user.admin) and src.
+- For one number of a period (the highest value, how often, how long, how much) use aggregate, for "when was it
+  last ..." lastChange.
 - Only the states the recorder selected are recorded, and only for the retention (first of getTimeline). For a
   missing state say so; enableHistory records it from now on, if the user wants that.
 - ackAnomaly, enableHistory, disableHistory and simulation.enabled change something: only on the user's

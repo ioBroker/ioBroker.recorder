@@ -17,12 +17,12 @@ function commandsOfMain() {
 
 describe('help', () => {
     it('lists exactly the commands onMessage answers', () => {
-        assert.deepStrictEqual([...COMMANDS].sort(), commandsOfMain().sort());
+        assert.deepStrictEqual(COMMANDS.map(c => c.command).sort(), commandsOfMain().sort());
     });
 
     it('names every command, category and source for an agent', () => {
         for (const word of [
-            ...COMMANDS.filter(c => c !== 'help'),
+            ...COMMANDS.map(c => c.command).filter(c => c !== 'help'),
             ...CATEGORIES.map(c => c.key),
             'user',
             'script',
@@ -41,5 +41,22 @@ describe('help', () => {
         for (const line of HELP.split('\n')) {
             assert.ok(line.length <= 120, line);
         }
+    });
+
+    it('marks the standard commands of the shared catalog and the ones that change something', () => {
+        assert.deepStrictEqual(
+            COMMANDS.filter(c => c.standard).map(c => [c.command, c.standard]),
+            [
+                ['getEvents', 'history.getEvents'],
+                ['getHistory', 'history.getHistory'],
+                ['aggregate', 'history.aggregate'],
+                ['lastChange', 'history.lastChange'],
+            ],
+        );
+        assert.deepStrictEqual(
+            COMMANDS.filter(c => c.write).map(c => c.command),
+            ['ackAnomaly', 'enableHistory', 'disableHistory', 'recalculate'],
+        );
+        assert.ok(HELP.includes('standard commands of the shared'));
     });
 });

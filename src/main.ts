@@ -20,7 +20,7 @@ import {
 } from './lib/filter';
 import { AnomalyDetector, type DetectorHost } from './lib/detector';
 import { COMMANDS, HELP } from './lib/help';
-import { parseHistoryRequest, readHistory, toTimestamp } from './lib/history';
+import { parseHistoryRequest, readHistory, readStoredValues, toTimestamp } from './lib/history';
 import { estimateSize, renderHighFrequency, renderPreview, summaryText } from './lib/preview';
 import {
     aliasTarget,
@@ -43,6 +43,7 @@ import {
 } from './lib/simulator';
 import { classifySource, sourceComment } from './lib/source';
 import { DRIVER_NAME } from './lib/sqlite';
+import { aggregate, lastChange, type ValueSource } from './lib/standardHistory';
 import { HourStats, hourFloor } from './lib/stats';
 import { Storage } from './lib/storage';
 import {
@@ -511,7 +512,7 @@ class RecorderAdapter extends utils.Adapter {
         switch (obj.command) {
             case 'help':
                 // what the instance answers, for an AI agent
-                respond({ help: HELP });
+                respond({ help: HELP, commands: COMMANDS });
                 break;
 
             case 'getSelection':
@@ -591,6 +592,15 @@ class RecorderAdapter extends utils.Adapter {
                 this.handleGetHistory(obj);
                 break;
 
+            // the commands of the shared catalog, computed from the values of getHistory
+            case 'aggregate':
+                void aggregate(obj.message, this.standardSource()).then(respond);
+                break;
+
+            case 'lastChange':
+                void lastChange(obj.message, this.standardSource()).then(respond);
+                break;
+
             case 'features':
                 // no update, delete or storeState: the recorder keeps what happened
                 respond({ supportedFeatures: [] });
@@ -609,7 +619,7 @@ class RecorderAdapter extends utils.Adapter {
                 break;
 
             default:
-                respond({ error: `Unknown command: ${obj.command}`, commands: COMMANDS });
+                respond({ error: `Unknown command: ${obj.command}`, commands: COMMANDS.map(c => c.command) });
         }
     }
 
@@ -645,6 +655,25 @@ class RecorderAdapter extends utils.Adapter {
             }
         }
         sendResponse(this, msg, id, options, data, startTime);
+    }
+
+    /** The stored values for `aggregate` and `lastChange`, read as `getHistory` reads them with aggregate none */
+    private standardSource(): ValueSource {
+        return {
+            read: (id, query) => {
+                const storage = this.storage;
+                if (!storage) {
+                    return Promise.reject(new Error('The instance is not ready yet'));
+                }
+                // also datapoints that are not recorded anymore, as long as their data is kept
+                const recordedId = this.dps.has(id) ? id : this.recordedAliases.get(id) || id;
+                const dp = this.dps.get(recordedId) || storage.getDp(recordedId);
+                const pending = dp ? { events: this.buffer, aggregates: this.aggregator.pending(dp.id) } : null;
+                return Promise.resolve(dp && pending ? readStoredValues(storage, dp, query, pending) : []);
+            },
+            unit: async id =>
+                ((await this.getForeignObjectAsync(id))?.common as ioBroker.StateCommon | undefined)?.unit,
+        };
     }
 
     /** Answer of `getEnabledDPs`: the recorded datapoints, like the enabled ones of history */
