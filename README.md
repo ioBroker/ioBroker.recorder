@@ -444,7 +444,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 -->
 
 ## Changelog
-### **WORK IN PROGRESS**
+### 0.3.0 (2026-11-23)
 * (GermanBluefox) Added the standard commands of the shared catalog: history.aggregate (one number for a period: min, max, avg, sum, count, delta, first, last, integral, duration) and history.lastChange; getEvents and getHistory are marked as history.getEvents and history.getHistory; `help` answers also `commands` with `write` and `standard`
 * (GermanBluefox) Requires admin 7.6.20 or newer; fixed issues detected by the repository checker (#3)
 
@@ -463,17 +463,6 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 
 ### 0.1.1 (2026-11-17)
 * (bluefox) README: comparison with `history`, `sql` and `influxdb` as a table
-
-### 0.1.0 (2026-11-17)
-* (bluefox) Initial version: storage layer, batched writing, keyframes, retention
-* (bluefox) Automatic selection of the states: type detector, rooms/functions, roles, rules, per-state settings, preview in the admin
-* (bluefox) 5 minute aggregation for high-frequency values (energy)
-* (bluefox) `getHistory`, `features`, `getEnabledDPs`, `enableHistory`, `disableHistory` like `history`, `sql` and `influxdb`; `common.getHistory`, so that admin and echarts offer the instance
-* (bluefox) Frequency filter (dead band, minimum interval, heartbeat, throttling) and classification of high-frequency states by their measured rate
-* (bluefox) Walk into the past: `getSnapshot`, `getEvents`, `getTimeline`, replay with mirror states and the admin tab "Time machine"
-* (bluefox) Presence simulation: replays the switching of lights and blinds of a recorded day at home, started by an absence state or by hand
-* (bluefox) Anomaly detection: hourly statistics and weekly profiles, six rules (unusual value, rare activity, silent sensor, open too long, window open in the cold, racing datapoint), states and ioBroker notifications
-* (bluefox) Anomaly detection learns from the existing recording; the profiles are rebuilt in small steps
 
 ## License
 The MIT License (MIT)
