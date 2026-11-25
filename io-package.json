@@ -5,16 +5,16 @@
     "news": {
       "0.3.1": {
         "en": "An alias that converts its value (read function, other type, scaling to or from %) does not replace its target anymore: both are recorded, and a request for the target is not answered from the alias",
-        "de": "Ein Alias, der seinen Wert umwandelt (Lesefunktion, anderer Typ, skaliert auf oder von%), ersetzt sein Ziel nicht mehr: Beide werden aufgezeichnet, und der Alias beantwortet nicht",
+        "de": "Ein Alias, der seinen Wert umwandelt (Lesefunktion, anderer Typ, Skalierung auf oder von %), ersetzt sein Ziel nicht mehr: Beide werden aufgezeichnet, und eine Abfrage des Ziels wird nicht mehr aus dem Alias beantwortet",
         "ru": "Псевдоним, преобразующий свое значение (функция чтения, другой тип, масштабирование в% или обратно), больше не заменяет целевое значение: оба файла записываются, и псевдоним не отвечает на запрос целевого объекта",
         "pt": "Um alias que converte seu valor (função de leitura, outro tipo, escala de/para%) não substitui mais o alvo: ambos são gravados e a solicitação do alvo não é respondida pelo alias",
         "nl": "Een alias die zijn waarde omzet (leesfunctie, ander type, schaalvergroting naar of van%) vervangt het doel niet meer: beide worden geregistreerd en een verzoek om het doel wordt niet beantwoord via de alias",
-        "fr": "Un alias qui convertit sa valeur (fonction de lecture, autre type, mise à l'échelle ou depuis %) ne remplace plus sa cible : les deux sont enregistrés et l'alias ne répond pas à la demande",
-        "it": "Un alias che converte il suo valore (funzione di lettura, altro tipo, scala da o verso%) non sostituisce più il suo target: entrambi sono registrati e l'alias non risponde",
+        "fr": "Un alias qui convertit sa valeur (fonction de lecture, autre type, mise à l'échelle vers ou depuis %) ne remplace plus sa cible : les deux sont enregistrés, et une requête sur la cible n'est plus servie par l'alias",
+        "it": "Un alias che converte il suo valore (funzione di lettura, altro tipo, scala da o verso %) non sostituisce più il suo target: entrambi vengono registrati e una richiesta per il target non riceve più la risposta dall'alias",
         "es": "Un alias que convierte su valor (función de lectura, otro tipo, escala hacia o desde%) ya no sustituye a su objetivo: ambos se registran y el alias no responde a la solicitud del objetivo",
         "pl": "Alias, który konwertuje swoją wartość (funkcja odczytu, inny typ, skalowanie do lub z%), nie zastępuje już celu: oba są rejestrowane, a żądanie docelowe nie jest odpowiadane z aliasu",
         "uk": "Псевдонім, який перетворює його значення (функція читання, інший тип, масштабування до або від%) більше не замінює його цільове значення: обидва записуються, а запит на ціль не отримує відповіді від псевдоніма",
-        "zh-cn": "转换其值（读取函数、其他类型、缩放至% 或缩放比例）的别名不再替换其目标：两者都被记录下来，并且该别名无法回复对目标的请求"
+        "zh-cn": "转换其值的别名（读取函数、其他类型、与 % 之间的缩放）不再替代其目标：两者都会被记录，对目标的请求也不再由该别名应答"
       },
       "0.3.0": {
         "en": "Added the standard commands of the shared catalog: history.aggregate (one number for a period: min, max, avg, sum, count, delta, first, last, integral, duration) and history.lastChange; getEvents and getHistory are marked as history.getEvents and history.getHistory; `help` answers also `commands` with `write` and `standard`\nRequires admin 7.6.20 or newer; fixed issues detected by the repository checker (#3)",
