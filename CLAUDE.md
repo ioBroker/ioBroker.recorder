@@ -121,7 +121,13 @@ gitignored, so `npm run build` must run before `npm pack`.
 is skipped. Room and function names are deduplicated (two enums with the same name).
 
 `system.*` and the own namespace are never selected automatically. An alias and its target carry
-the same values: the alias is kept, the target dropped (unless included manually).
+the same values: the alias is kept, the target dropped (unless included manually). This holds only
+for an alias that passes the value on unchanged (`faithfulAliasTarget()`): js-controller changes it
+by a read function (`common.alias.read`, e.g. `-val` or `val[2]`), by converting it to the type of
+the alias (boolean, number, string), and by scaling it between % and min/max (one of the two has
+the unit %, the other min and max; 0..100 is left as it is). Such an alias is a different curve, so
+both are recorded. Several aliases with read functions often point to one state (one per phase of
+an array of powers).
 
 The type detector is the expensive part (~1 s for 40,000 states on a desktop CPU). `DeviceDetection`
 keeps its results per examined object; `onObjectChange` invalidates the object, its channel, its
@@ -167,7 +173,8 @@ the aggregation, so all methods (`none`, `onchange`, `minmax`, `average`, `total
 - Strings and JSON fall back from a numeric method to `onchange`; booleans are 0/1 for the
   aggregation and `true`/`false` for `none`/`onchange`.
 - `from: true` also returns `user`; `comment: true` returns `c` (the script, as history does); `q` is not stored.
-- A request for the target of a recorded alias is answered from the alias.
+- A request for the target of a recorded alias is answered from the alias, if the alias passes the
+  value on unchanged (see above); otherwise the answer would carry converted values.
 
 `common.getHistory: true` in `io-package.json` is required: admin (chart in the object dialog,
 "default history" in the system settings) and the echarts editor list only instances with this

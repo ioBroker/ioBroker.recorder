@@ -252,6 +252,53 @@ export function aliasTarget(obj: ioBroker.StateObject): string | null {
     return typeof alias.id === 'string' ? alias.id : alias.id.read || null;
 }
 
+/** Value types js-controller converts the value of an alias to (`applyAliasConvenienceConversion`) */
+const CONVERTED_TYPES = new Set(['boolean', 'number', 'string']);
+
+/**
+ * Whether js-controller scales between the two (`applyAliasAutoScaling`): both are numbers, only `percent` has
+ * the unit %, and `other` has min and max. With min 0 and max 100 the scaling leaves the value as it is.
+ */
+function scalesPercent(percent: ioBroker.StateCommon, other: ioBroker.StateCommon): boolean {
+    return (
+        percent.type === 'number' &&
+        percent.unit === '%' &&
+        other.type === 'number' &&
+        other.unit !== '%' &&
+        other.min !== undefined &&
+        other.max !== undefined &&
+        !(other.min === 0 && other.max === 100)
+    );
+}
+
+/**
+ * The ID an alias reads from, if the alias carries the values of that state unchanged. On the way
+ * js-controller may change the value (`formatAliasValue`): by a read function, by converting it to the
+ * type of the alias, or by scaling it to or from %. Then the alias and its target are two different curves.
+ */
+export function faithfulAliasTarget(
+    obj: ioBroker.StateObject,
+    objects: Record<string, ioBroker.Object>,
+): string | null {
+    const target = aliasTarget(obj);
+    const source = target ? objects[target] : undefined;
+    if (!target || source?.type !== 'state' || !source.common) {
+        return null;
+    }
+    const alias = obj.common;
+    const original = source.common as ioBroker.StateCommon;
+    if ((alias as { alias?: { read?: string } }).alias?.read) {
+        return null;
+    }
+    if (alias.type && CONVERTED_TYPES.has(alias.type) && alias.type !== original.type) {
+        return null;
+    }
+    if (scalesPercent(alias, original) || scalesPercent(original, alias)) {
+        return null;
+    }
+    return target;
+}
+
 /** A state found by the type detector */
 interface DetectedState extends Candidate {
     id: string;
@@ -572,15 +619,15 @@ export function computeSelection(
             reason,
         });
         if (id.startsWith('alias.')) {
-            const target = aliasTarget(obj);
+            const target = faithfulAliasTarget(obj, objects);
             if (target) {
                 aliasTargets.set(target, id);
             }
         }
     }
 
-    // An alias and its target carry the same values. The alias is kept (it was set up by the user,
-    // with name and room), the target is dropped, unless the user asked for it explicitly.
+    // An alias without conversion and its target carry the same values. The alias is kept (it was set up
+    // by the user, with name and room), the target is dropped, unless the user asked for it explicitly.
     for (const [target, alias] of aliasTargets) {
         const dp = selected.get(target);
         if (dp && !dp.reason.startsWith('Include') && !dp.reason.startsWith('Custom')) {

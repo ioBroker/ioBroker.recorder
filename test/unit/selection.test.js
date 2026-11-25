@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert');
-const { computeSelection, DeviceDetection, displayName } = require('../../build/lib/selection');
+const { computeSelection, DeviceDetection, displayName, faithfulAliasTarget } = require('../../build/lib/selection');
 const { categoryModes, isNegativeRole, categoryOfRole } = require('../../build/lib/categories');
 const { DpClass } = require('../../build/lib/types');
 
@@ -102,6 +102,69 @@ describe('selection', () => {
         assert.ok(!selected.has('system.adapter.admin.0.alive'));
     });
 
+    it('records both an alias that converts its value and its target', () => {
+        const objects = createObjects();
+        const st = (id, common) =>
+            (objects[id] = {
+                _id: id,
+                type: 'state',
+                common: { name: id, read: true, write: false, ...common },
+                native: {},
+            });
+        // the sign turned round, as for a PV inverter that reports production negative
+        st('alias.0.Energy.Lamp', {
+            role: 'value.power',
+            type: 'number',
+            unit: 'W',
+            alias: { id: 'zigbee.0.lamp.load_power', read: '-val' },
+        });
+        const { selected } = computeSelection(objects, config());
+        assert.ok(selected.has('alias.0.Energy.Lamp'));
+        assert.ok(selected.has('zigbee.0.lamp.load_power'), 'the target of a converting alias must stay');
+        assert.ok(!selected.get('alias.0.Energy.Lamp').reason.includes('alias of'));
+        // the faithful alias of the blind still replaces its target
+        assert.ok(!selected.has('hm-rpc.0.ABC.1.LEVEL'));
+    });
+
+    it('takes an alias as a copy of its target only if js-controller passes the value on unchanged', () => {
+        const objects = {
+            'a.0.level': { type: 'state', common: { type: 'number', unit: '%', min: 0, max: 100 } },
+            'a.0.raw': { type: 'state', common: { type: 'number', min: 0, max: 255 } },
+            'a.0.power': { type: 'state', common: { type: 'number', unit: 'W' } },
+            'a.0.powers': { type: 'state', common: { type: 'array' } },
+            'a.0.text': { type: 'state', common: { type: 'string' } },
+        };
+        const alias = common => ({
+            type: 'state',
+            common: { name: 'x', role: 'state', read: true, write: false, ...common },
+        });
+        const target = common => faithfulAliasTarget(alias(common), objects);
+
+        assert.strictEqual(target({ type: 'number', unit: 'W', alias: { id: 'a.0.power' } }), 'a.0.power');
+        assert.strictEqual(
+            target({ type: 'number', unit: 'W', alias: { id: { read: 'a.0.power', write: 'a.0.x' } } }),
+            'a.0.power',
+        );
+        assert.strictEqual(target({ type: 'mixed', alias: { id: 'a.0.text' } }), 'a.0.text');
+        // read function
+        assert.strictEqual(target({ type: 'number', alias: { id: 'a.0.power', read: '-val' } }), null);
+        assert.strictEqual(target({ type: 'number', alias: { id: 'a.0.powers', read: 'val[2]' } }), null);
+        // converted to the type of the alias
+        assert.strictEqual(target({ type: 'boolean', alias: { id: 'a.0.power' } }), null);
+        assert.strictEqual(target({ type: 'number', alias: { id: 'a.0.text' } }), null);
+        // scaled to or from %; 0..100 leaves the value as it is
+        assert.strictEqual(target({ type: 'number', unit: '%', alias: { id: 'a.0.raw' } }), null);
+        assert.strictEqual(target({ type: 'number', min: 0, max: 255, alias: { id: 'a.0.level' } }), null);
+        assert.strictEqual(target({ type: 'number', min: 0, max: 100, alias: { id: 'a.0.level' } }), 'a.0.level');
+        assert.strictEqual(
+            target({ type: 'number', unit: '%', min: 0, max: 255, alias: { id: 'a.0.level' } }),
+            'a.0.level',
+        );
+        // no alias, or a target that does not exist
+        assert.strictEqual(target({ type: 'number' }), null);
+        assert.strictEqual(target({ type: 'number', alias: { id: 'a.0.missing' } }), null);
+    });
+
     it('keeps motion off by default for privacy', () => {
         assert.ok(!computeSelection(createObjects(), config()).selected.has('zigbee.0.motion.occupancy'));
         const on = computeSelection(createObjects(), config({ categories: categoryModes({ catMotion: 'on' }) }));
@@ -142,7 +205,8 @@ describe('selection', () => {
 
     it('puts the name of the channel or device in front of names like "SET"', () => {
         const objects = {};
-        const add = (id, type, name) => (objects[id] = { _id: id, type, common: name === undefined ? {} : { name }, native: {} });
+        const add = (id, type, name) =>
+            (objects[id] = { _id: id, type, common: name === undefined ? {} : { name }, native: {} });
         add('alias.0.Kueche', 'folder', 'Kueche');
         add('alias.0.Kueche.Licht', 'channel', 'Licht');
         add('alias.0.Kueche.Licht.SET', 'state', 'SET');
@@ -155,7 +219,10 @@ describe('selection', () => {
         add('javascript.0.counter', 'state', 'counter');
         assert.strictEqual(displayName('alias.0.Kueche.Licht.SET', objects, 'de'), 'Licht SET');
         assert.strictEqual(displayName('alias.0.Kueche.Licht.ON_SET', objects, 'de'), 'Kueche Licht ON SET');
-        assert.strictEqual(displayName('shelly.0.plug1.Relay0.temperatureC', objects, 'de'), 'Waschmaschine temperatureC');
+        assert.strictEqual(
+            displayName('shelly.0.plug1.Relay0.temperatureC', objects, 'de'),
+            'Waschmaschine temperatureC',
+        );
         assert.strictEqual(displayName('zigbee.0.lamp.on_set', objects, 'en'), 'Hallway lamp on_set');
         assert.strictEqual(displayName('javascript.0.counter', objects, 'en'), 'counter');
     });

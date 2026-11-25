@@ -23,9 +23,9 @@ import { COMMANDS, HELP } from './lib/help';
 import { parseHistoryRequest, readHistory, readStoredValues, toTimestamp } from './lib/history';
 import { estimateSize, renderHighFrequency, renderPreview, summaryText } from './lib/preview';
 import {
-    aliasTarget,
     computeSelection,
     DeviceDetection,
+    faithfulAliasTarget,
     type Candidate,
     type RecorderCustom,
     type SelectionConfig,
@@ -186,7 +186,10 @@ class RecorderAdapter extends utils.Adapter {
     private readonly dps = new Map<string, DpInfo>();
     /** Why each datapoint is recorded */
     private readonly reasons = new Map<string, string>();
-    /** Recorded alias by the ID it reads from: `getHistory` of the target answers from the alias */
+    /**
+     * Recorded alias by the ID it reads from, for aliases that carry the values unchanged:
+     * `getHistory` of the target answers from the alias
+     */
     private readonly recordedAliases = new Map<string, string>();
     /** Last stored value per `dp.id` */
     private readonly cache = new Map<number, CachedValue>();
@@ -426,7 +429,7 @@ class RecorderAdapter extends utils.Adapter {
                 this.reasons.set(id, selected.reason);
                 this.filters.set(dp.id, this.filterOf(id, dp));
                 const obj = this.objects[id];
-                const target = obj?.type === 'state' ? aliasTarget(obj) : null;
+                const target = obj?.type === 'state' ? faithfulAliasTarget(obj, this.objects) : null;
                 if (target) {
                     this.recordedAliases.set(target, id);
                 }

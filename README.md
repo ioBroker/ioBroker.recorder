@@ -442,6 +442,8 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 	Placeholder for the next version (at the beginning of the line):
 	### **WORK IN PROGRESS**
 -->
+### **WORK IN PROGRESS**
+* (GermanBluefox) An alias that converts its value (read function, other type, scaling to or from %) does not replace its target anymore: both are recorded, and a request for the target is not answered from the alias
 
 ## Changelog
 ### 0.3.0 (2026-11-23)
