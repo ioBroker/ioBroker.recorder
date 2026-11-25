@@ -442,10 +442,9 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 	Placeholder for the next version (at the beginning of the line):
 	### **WORK IN PROGRESS**
 -->
-### **WORK IN PROGRESS**
+### 0.3.1 (2026-11-25)
 * (GermanBluefox) An alias that converts its value (read function, other type, scaling to or from %) does not replace its target anymore: both are recorded, and a request for the target is not answered from the alias
 
-## Changelog
 ### 0.3.0 (2026-11-23)
 * (GermanBluefox) Added the standard commands of the shared catalog: history.aggregate (one number for a period: min, max, avg, sum, count, delta, first, last, integral, duration) and history.lastChange; getEvents and getHistory are marked as history.getEvents and history.getHistory; `help` answers also `commands` with `write` and `standard`
 * (GermanBluefox) Requires admin 7.6.20 or newer; fixed issues detected by the repository checker (#3)
@@ -462,9 +461,6 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 ### 0.1.2 (2026-11-17)
 * (bluefox) Requires admin 7.6.17 or newer
 * (bluefox) Published with npm trusted publishing (provenance)
-
-### 0.1.1 (2026-11-17)
-* (bluefox) README: comparison with `history`, `sql` and `influxdb` as a table
 
 ## License
 The MIT License (MIT)
