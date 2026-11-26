@@ -442,7 +442,7 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 	Placeholder for the next version (at the beginning of the line):
 	### **WORK IN PROGRESS**
 -->
-### **WORK IN PROGRESS**
+### 0.3.2 (2026-11-26)
 * (GermanBluefox) Fixed the translations of the news of 0.3.1 (some were cut off); added `.vscode/settings.json` with the JSON schemas of io-package.json and the admin pages
 
 ### 0.3.1 (2026-11-25)
@@ -460,10 +460,6 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 ### 0.1.3 (2026-11-19)
 * (bluefox) README: description of `getSnapshot`, `getEvents` and `getTimeline`; German documentation in `docs/de/README.md`
 * (bluefox) Message `help`: describes all messages and states for an AI agent (e.g. ioBroker.pi-agent); an unknown message answers with the list of messages
-
-### 0.1.2 (2026-11-17)
-* (bluefox) Requires admin 7.6.17 or newer
-* (bluefox) Published with npm trusted publishing (provenance)
 
 ## License
 The MIT License (MIT)

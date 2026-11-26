@@ -1,4 +1,8 @@
 # Older changes
+## 0.1.2 (2026-11-17)
+* (bluefox) Requires admin 7.6.17 or newer
+* (bluefox) Published with npm trusted publishing (provenance)
+
 ## 0.1.1 (2026-11-17)
 * (bluefox) README: comparison with `history`, `sql` and `influxdb` as a table
 

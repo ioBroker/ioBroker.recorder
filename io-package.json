@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "recorder",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "news": {
+      "0.3.2": {
+        "en": "Fixed the translations of the news of 0.3.1 (some were cut off); added `.vscode/settings.json` with the JSON schemas of io-package.json and the admin pages",
+        "de": "Übersetzungen der Neuigkeiten von 0.3.1 korrigiert (einige waren abgeschnitten); `.vscode/settings.json` mit den JSON-Schemas von io-package.json und den Admin-Seiten hinzugefügt",
+        "ru": "Исправлены переводы новостей версии 0.3.1 (некоторые были обрезаны); добавлен `.vscode/settings.json` со схемами JSON для io-package.json и страниц администратора",
+        "pt": "Corrigidas as traduções das notícias da versão 0.3.1 (algumas estavam cortadas); adicionado `.vscode/settings.json` com os esquemas JSON de io-package.json e das páginas do admin",
+        "nl": "De vertalingen van het nieuws van 0.3.1 gecorrigeerd (sommige waren afgekapt); `.vscode/settings.json` toegevoegd met de JSON-schema's van io-package.json en de admin-pagina's",
+        "fr": "Correction des traductions des nouveautés de la version 0.3.1 (certaines étaient tronquées) ; ajout de `.vscode/settings.json` avec les schémas JSON de io-package.json et des pages d'administration",
+        "it": "Corrette le traduzioni delle novità della 0.3.1 (alcune erano troncate); aggiunto `.vscode/settings.json` con gli schemi JSON di io-package.json e delle pagine di admin",
+        "es": "Se corrigieron las traducciones de las novedades de la 0.3.1 (algunas estaban cortadas); se añadió `.vscode/settings.json` con los esquemas JSON de io-package.json y de las páginas de administración",
+        "pl": "Poprawiono tłumaczenia informacji o zmianach w wersji 0.3.1 (niektóre były ucięte); dodano `.vscode/settings.json` ze schematami JSON dla io-package.json i stron administracyjnych",
+        "uk": "Виправлено переклади новин версії 0.3.1 (деякі були обрізані); додано `.vscode/settings.json` зі схемами JSON для io-package.json і сторінок адміністратора",
+        "zh-cn": "修正了 0.3.1 版更新说明的翻译（部分内容被截断）；添加了 `.vscode/settings.json`，其中包含 io-package.json 和管理页面的 JSON 架构"
+      },
       "0.3.1": {
         "en": "An alias that converts its value (read function, other type, scaling to or from %) does not replace its target anymore: both are recorded, and a request for the target is not answered from the alias",
         "de": "Ein Alias, der seinen Wert umwandelt (Lesefunktion, anderer Typ, Skalierung auf oder von %), ersetzt sein Ziel nicht mehr: Beide werden aufgezeichnet, und eine Abfrage des Ziels wird nicht mehr aus dem Alias beantwortet",
