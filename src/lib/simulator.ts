@@ -500,11 +500,11 @@ export class PresenceSimulation {
         }
         const end = addWindows(this.plan.start, 1);
         const due = this.next < this.plan.actions.length ? this.plan.actions[this.next].ts : end;
-        const wait = Math.min(Math.max(0, due - this.host.now()), MAX_WAIT);
+        const delay = Math.min(Math.max(0, due - this.host.now()), MAX_WAIT);
         this.timer = this.host.startTimer(() => {
             this.timer = null;
             void this.tick();
-        }, wait);
+        }, delay);
     }
 
     private async tick(): Promise<void> {

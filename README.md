@@ -438,6 +438,7 @@ spares SD cards. The retention deletes whole week files daily at 03:30.
 
 Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 
+## Changelog
 <!--
 	Placeholder for the next version (at the beginning of the line):
 	### **WORK IN PROGRESS**
