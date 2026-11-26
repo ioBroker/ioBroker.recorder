@@ -442,6 +442,9 @@ Requires Node.js 22.19 or newer (`node:sqlite`, no native module).
 	Placeholder for the next version (at the beginning of the line):
 	### **WORK IN PROGRESS**
 -->
+### **WORK IN PROGRESS**
+* (GermanBluefox) Fixed the translations of the news of 0.3.1 (some were cut off); added `.vscode/settings.json` with the JSON schemas of io-package.json and the admin pages
+
 ### 0.3.1 (2026-11-25)
 * (GermanBluefox) An alias that converts its value (read function, other type, scaling to or from %) does not replace its target anymore: both are recorded, and a request for the target is not answered from the alias
 
